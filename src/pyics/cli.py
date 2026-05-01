@@ -1,5 +1,7 @@
+from concurrent.futures import thread
 import queue
 import sys
+import threading
 import time
 import signal
 import shutil
@@ -14,8 +16,6 @@ from rich.text import Text
 from rich.table import Table
 from rich.align import Align
 
-from pyics.key_listener import hey_listen
-
 __version__ = "0.1.0"
 
 LINE_UP = "\033[1A"
@@ -28,6 +28,7 @@ ALT_SCREEN_LEAVE = "\033[?1049l"
 
 class CLI:
     def __init__(self) -> None:
+        self.running = False
         self.console = Console()
         self.progress = Progress(
             TextColumn("[progress.description]{task.description}"),
@@ -41,7 +42,12 @@ class CLI:
             expand=True,
         )
         self.task_id = self.progress.add_task("Progress", total=1)
-        self.hotkeys = {"ctrl-c": "Quit"}
+        self.hotkeys = {
+            "ctrl-c": "Quit",
+            "n": "next task",
+            "p": "previous task",
+            "s": "skip",
+        }
         self.info_text = "Ready."
         self.main_content = Text("Main program outputs will appear here...", style="dim")
         self.percentage = 0.0
@@ -55,7 +61,12 @@ class CLI:
         self._needs_redraw = True
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
-        self.run()  # pyright: ignore[reportCallIssue]
+        """
+        Start up the cli Daemon
+        """
+        self.running = True
+        thread = threading.Thread(target=self.run, daemon=True)
+        thread.start()
 
     def generate_header(self) -> Panel:
         figlet_text = Figlet(font="big").renderText("PyICs").strip("\n")
@@ -132,22 +143,15 @@ class CLI:
         self.console.print(footer_panel)
         self._needs_redraw = False
 
-    @hey_listen("q")
-    def run(self, q: queue.Queue[str]):
+    def run(self):
         sys.stdout.write(HIDE_CURSOR)
         sys.stdout.flush()
 
         try:
-            while True:
-                if self._needs_redraw:
-                    self.draw_interface()
+            while self.running:
+                self.draw_interface() if self._needs_redraw else None
 
-                try:
-                    key = q.get_nowait()
-                    if key == "\x03":  # ctrl-c
-                        break
-                except queue.Empty:
-                    pass
+                time.sleep(0.05)
 
         finally:
             sys.stdout.write(SHOW_CURSOR)
