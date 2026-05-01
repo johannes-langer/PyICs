@@ -1,0 +1,14 @@
+{
+    "name": "exercise_0",
+    "ex_files": ["exercises/exercise_0.py"],
+    "sol_files": ["solutions/exercise_0.py"],
+    "exercise_code": [""],
+    "solution_code": [""],
+    "tests": [
+        {
+            "type": "",
+            "mode": "lenient",
+            "params": []
+        }
+    ]
+}
