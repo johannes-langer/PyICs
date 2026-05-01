@@ -11,8 +11,8 @@ from pyics.cli import CLI
 from pyics.key_listener import hey_listen
 
 
-class PyICs:
-    """PyICs main thread"""
+class PyIC:
+    """PyIC main thread"""
 
     def __init__(self, cli: CLI):
         self.cli = cli

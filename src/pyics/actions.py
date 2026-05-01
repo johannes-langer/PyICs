@@ -1,4 +1,4 @@
-from abc import ABC
+from abc import ABC, abstractmethod
 from typing import Optional
 
 
@@ -30,6 +30,7 @@ class Action(ABC):
         self.exec(**self.kwargs)
 
     @staticmethod
+    @abstractmethod
     def exec(**kwargs) -> None: ...
 
 

@@ -33,6 +33,11 @@ wheels = [
 ]
 
 [[package]]
+name = "fullsignatureprotocols"
+version = "0.0.1"
+source = { git = "https://github.com/johannes-langer/full-signature-protocols#45366e60ba9d33a6bf8cb9f5440b5c321b63cf2f" }
+
+[[package]]
 name = "jsonargparse"
 version = "4.48.0"
 source = { registry = "https://pypi.org/simple" }
@@ -88,6 +93,7 @@ name = "pyics"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
+    { name = "fullsignatureprotocols" },
     { name = "jsonargparse" },
     { name = "pyfiglet" },
     { name = "rich" },
@@ -97,6 +103,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fullsignatureprotocols", git = "https://github.com/johannes-langer/full-signature-protocols" },
     { name = "jsonargparse", specifier = ">=4.48.0" },
     { name = "pyfiglet", specifier = ">=1.0.4" },
     { name = "rich", specifier = ">=15.0.0" },

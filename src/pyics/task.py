@@ -29,7 +29,8 @@ class Task:
 
         self.create_files(raw_json["exercise_code"], raw_json["solution_code"])
 
-        self.tests: list[Test] = [Test(test_dict) for test_dict in raw_json["tests"]]
+        # TODO: Do this properly. Probably use custon json serialization like I did in the trains dataset.
+        # self.tests: list[Test] = [Test(test_dict) for test_dict in raw_json["tests"]]
 
         self.last_mtimes = {
             f: os.path.getmtime(f) for f in self.exercise_files if os.path.exists(f)
@@ -106,7 +107,21 @@ class Task:
         """
         task: dict = {}
 
-        ...
+        task["name"] = name
+
+        task["ex_files"] = ex_files if isinstance(ex_files, list) else [ex_files]
+        task["sol_files"] = sol_files if isinstance(sol_files, list) else [sol_files]
+
+        def read_file_to_string(fp: str | Path) -> str:
+            with open(fp, "r") as f:
+                return f.read()
+
+        task["exercise_code"] = [read_file_to_string(f) for f in task["ex_files"]]
+        task["solution_code"] = [read_file_to_string(f) for f in task["sol_files"]]
+
+        task["tests"] = [
+            t.serialize() for t in (tests if isinstance(tests, list) else [tests])
+        ]
 
         with open(fp, "W") as f:
             json.dump(task, f)

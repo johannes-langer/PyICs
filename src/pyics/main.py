@@ -3,7 +3,7 @@ import sys
 import time
 
 from pyics.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI
-from pyics.pyics import PyICs
+from pyics.pyics import PyIC
 
 
 def main():
@@ -14,7 +14,7 @@ def main():
     cli = CLI()
     cli.update_progress(0.3)
 
-    pyics = PyICs(cli)
+    pyics = PyIC(cli)
 
     try:
         pyics()
