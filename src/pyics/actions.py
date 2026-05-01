@@ -100,3 +100,15 @@ class Previous(Action):
     def exec(**kwargs) -> None:
         """TODO"""
         ...
+
+
+class ResetTask(Action):
+    """Reset the current task."""
+
+    def __init__(self, name: str = "Reset Task", key: str = "r", **kwargs):
+        super().__init__(name, key, **kwargs)
+
+    @staticmethod
+    def exec(**kwargs) -> None:
+        """TODO"""
+        ...

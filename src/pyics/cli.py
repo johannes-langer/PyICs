@@ -38,12 +38,7 @@ class CLI:
             expand=True,
         )
         self.task_id = self.progress.add_task("Progress", total=1)
-        self.hotkeys = {
-            "ctrl-c": "Quit",
-            "n": "next task",
-            "p": "previous task",
-            "s": "skip",
-        }
+        self.hotkeys = {}
         self.info_text = "Ready."
         self.main_content = Text("Main program outputs will appear here...", style="dim")
         self.percentage = 0.0
