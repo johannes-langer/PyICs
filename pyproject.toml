@@ -1,7 +1,7 @@
 [project]
 name = "pyics"
 version = "0.0.1"
-description = "Add your description here"
+description = "PyICs (Python Interactive Courses) is a modular framework for teaching programming in Python locally, allowing for co-learning of a programming environment."
 readme = "README.md"
 authors = [
     { name = "johannes-langer", email = "johannes.langer@uni-bamberg.de" }

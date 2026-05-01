@@ -76,3 +76,27 @@ class Demo(Action):
     def exec(**kwargs) -> None:
         cli = kwargs["cli"]
         cli.update_main_content("[dim]The hotkey for the demo action has been pressed.")
+
+
+class Next(Action):
+    """Move to the next task."""
+
+    def __init__(self, name: str = "Next", key: str = "n", **kwargs):
+        super().__init__(name, key, **kwargs)
+
+    @staticmethod
+    def exec(**kwargs) -> None:
+        """TODO"""
+        ...
+
+
+class Previous(Action):
+    """Go back to the previous task."""
+
+    def __init__(self, name: str = "Previous", key: str = "p", **kwargs):
+        super().__init__(name, key, **kwargs)
+
+    @staticmethod
+    def exec(**kwargs) -> None:
+        """TODO"""
+        ...

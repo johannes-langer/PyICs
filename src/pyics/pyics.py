@@ -2,7 +2,7 @@ import json
 import queue
 import threading
 import time
-from typing import Any, Callable
+from typing import Any
 
 from jsonargparse import Namespace
 
