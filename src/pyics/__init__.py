@@ -1,3 +1,3 @@
-from .main import launch
+from .main import main
 
-all = ["launch"]
+all = ["main"]

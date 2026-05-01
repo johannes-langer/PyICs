@@ -1,22 +1,18 @@
-from concurrent.futures import thread
-import queue
+import importlib.metadata
+import signal
 import sys
 import threading
 import time
-import signal
-import shutil
-from typing import Dict, Any
+from typing import Any
 
 from pyfiglet import Figlet
 from rich import box
-from rich.console import Console, Group
-from rich.panel import Panel
-from rich.progress import Progress, BarColumn, TextColumn
-from rich.text import Text
-from rich.table import Table
 from rich.align import Align
-
-__version__ = "0.1.0"
+from rich.console import Console, Group, RenderableType
+from rich.panel import Panel
+from rich.progress import BarColumn, Progress, TextColumn
+from rich.table import Table
+from rich.text import Text
 
 LINE_UP = "\033[1A"
 LINE_CLEAR = "\x1b[2K"
@@ -58,17 +54,23 @@ class CLI:
         signal.signal(signal.SIGWINCH, self._handle_resize)
 
     def _handle_resize(self, signum, frame):
+        """
+        Resize handler to attach to the SIGWINCH signal.
+        """
         self._needs_redraw = True
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         """
-        Start up the cli Daemon
+        Start up the cli Daemon.
         """
         self.running = True
         thread = threading.Thread(target=self.run, daemon=True)
         thread.start()
 
     def generate_header(self) -> Panel:
+        """
+        Construct the header from the info-text attribute.
+        """
         figlet_text = Figlet(font="big").renderText("PyICs").strip("\n")
 
         table = Table(
@@ -87,7 +89,7 @@ class CLI:
 
         return Panel(
             table,
-            title=f"version {__version__}",
+            title=f"[blue]PyICs[white] {importlib.metadata.version('pyics')}",
             title_align="left",
             border_style="blue",
             box=box.ROUNDED,
@@ -95,6 +97,9 @@ class CLI:
         )
 
     def generate_footer(self) -> Panel:
+        """
+        Construct the footer from the hotkey and progress bar attributes.
+        """
         hotkeys_text = Text()
         for i, (key, action) in enumerate(self.hotkeys.items()):
             if i > 0:
@@ -108,23 +113,61 @@ class CLI:
 
         return Panel(group, border_style="blue", box=box.ROUNDED)
 
-    def update_main_content(self, renderable):
+    def update_main_content(self, renderable: RenderableType):
+        """
+        Update the content of the main panel.
+
+        Parameters
+        ----------
+        renderable: RenderableType
+            New content to put inside the main panel.
+        """
         self.main_content = renderable
         self._needs_redraw = True
 
     def update_progress(self, percentage: float):
+        """
+        Update the progress displayed in the progress bar in the footer.
+
+        Parameters
+        ----------
+        percentage: float
+            New progress percentage (as a fraction!)
+        """
         self.percentage = percentage
         self._needs_redraw = True
 
     def update_hotkeys(self, hotkeys: dict):
+        """
+        Update the hotkeys displayed in the footer. This intentionally _replaces_ the dict,
+        because that way it is easy for the controller to both remove and add or update
+        components.
+
+        Parameters
+        ----------
+        hotkeys: dict
+            Hotkey dict.
+        """
         self.hotkeys = hotkeys
         self._needs_redraw = True
 
     def update_info(self, text: str):
+        """
+        Update the info_text. The info text is shown in the right part of the header panel.
+
+        Parameters
+        ----------
+        text: str
+            The new info-text to draw. Supports ``rich`` markup.
+        """
         self.info_text = text
         self._needs_redraw = True
 
     def draw_interface(self):
+        """
+        Draw the PyICs interface. Composes header, footer, and main panel from the object's
+        attributes.
+        """
         header_panel = self.generate_header()
         footer_panel = self.generate_footer()
 
@@ -144,6 +187,10 @@ class CLI:
         self._needs_redraw = False
 
     def run(self):
+        """
+        Main CLI loop. While running, checks if a redraw is necessary (either updated
+        content or window-resize), and redraws the interface when necessary.
+        """
         sys.stdout.write(HIDE_CURSOR)
         sys.stdout.flush()
 

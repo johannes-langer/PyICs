@@ -11,9 +11,12 @@ PyICs is a framework for interactive Python tutorials, inspired by the _rustling
 
 ## TODO
 
-- [ ] Main CLI, including
-  - [ ] A progress bar
-  - [ ] A hotkey reference
+- [x] Main CLI, including
+  - [x] A progress bar
+  - [x] A hotkey reference
+- [x] ``PyICs`` main class as controller
 - [ ] Logic for evaluating a file when it is saved.
 - [ ] Pick some library for high-quality error messages
 - [ ] Track Progress (simply store a json file). Only prompt for a username on first launch or reset.
+- [ ] Save Tasks as json files. When simply launching pyics, it should check the working directory for a ``.tasks`` directory, assuming that task json files are stored there.
+- [ ] Links in console output, so that I can click on the current exercise file, just like in Rustlings
