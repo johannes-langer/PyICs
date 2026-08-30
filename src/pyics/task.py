@@ -1,9 +1,10 @@
 import json
 import os
+from os import PathLike
 from pathlib import Path
 from typing import Union
 
-from snoop import snoop
+import jsonargparse
 
 from pyics.tests import Test
 
@@ -81,11 +82,11 @@ class Task:
 
     @staticmethod
     def create_task_json(
-        fp: Union[str, Path],
+        fp: PathLike,
         name: str,
-        ex_files: Union[str, Path, list[str | Path]],
-        sol_files: Union[str, Path, list[str | Path]],
-        tests: Union[Test, list[Test]],
+        ex_files: Union[PathLike, list[PathLike]],
+        sol_files: Union[PathLike, list[PathLike]],
+        tests: Union[PathLike, list[PathLike]],
     ):
         """TODO
         Create a task_json from all relevant information as it would naturally be available
@@ -93,7 +94,7 @@ class Task:
 
         Parameters
         ----------
-        fp: Union[str, Path]
+        fp: PathLike
             Desired output path
         name: str
             Name of the task
@@ -101,9 +102,8 @@ class Task:
             Filename or list of filenames of exercise files.
         sol_files: Union[str, Path, list[str | Path]]
             Filename or list of filenames of solution files.
-        tests: Union[Test, list[Test]]
-            Test or list of tests the exercise tasks must pass for the task to count as
-            completed.
+        tests: Union[PathLike, list[PathLike]]
+            Filename or list of filenames containing serialized tests
         """
         task: dict = {}
 
@@ -111,17 +111,26 @@ class Task:
 
         task["ex_files"] = ex_files if isinstance(ex_files, list) else [ex_files]
         task["sol_files"] = sol_files if isinstance(sol_files, list) else [sol_files]
+        test_files = tests if isinstance(tests, list) else [tests]
 
-        def read_file_to_string(fp: str | Path) -> str:
+        def read_file_to_string(fp: PathLike) -> str:
             with open(fp, "r") as f:
                 return f.read()
 
         task["exercise_code"] = [read_file_to_string(f) for f in task["ex_files"]]
         task["solution_code"] = [read_file_to_string(f) for f in task["sol_files"]]
-
-        task["tests"] = [
-            t.serialize() for t in (tests if isinstance(tests, list) else [tests])
-        ]
+        task["tests"] = [read_file_to_string(f) for f in test_files]
 
         with open(fp, "W") as f:
             json.dump(task, f)
+
+
+if __name__ == "__main__":
+    args = jsonargparse.auto_cli()
+    Task.create_task_json(
+        fp=args.fp,
+        name=args.name,
+        ex_files=args.ex_files,
+        sol_files=args.sol_files,
+        tests=args.tests,
+    )

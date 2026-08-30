@@ -43,8 +43,6 @@ class CLI:
         self.main_content = Text("Main program outputs will appear here...", style="dim")
         self.percentage = 0.0
 
-        figlet_text = Figlet(font="big").renderText("PyICs").strip("\n")
-
         self._needs_redraw = True
         signal.signal(signal.SIGWINCH, self._handle_resize)
 

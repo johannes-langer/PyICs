@@ -9,8 +9,10 @@ authors = [
 requires-python = ">=3.14"
 dependencies = [
     "fullsignatureprotocols",
+    "ipykernel>=7.3.0",
     "jsonargparse>=4.48.0",
     "pyfiglet>=1.0.4",
+    "pytest>=9.0.3",
     "rich>=15.0.0",
     "ruff>=0.15.12",
     "snoop>=0.6.0",
@@ -18,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 pyics = "pyics:main"
+create_task = "pyics:task"
 
 [build-system]
 requires = ["uv_build>=0.11.8,<0.12.0"]
