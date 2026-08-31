@@ -6,7 +6,7 @@ from typing import Union
 
 import jsonargparse
 
-from pyics.tests import Test
+# from pyics.tests import Test
 
 
 class Task:
@@ -84,9 +84,9 @@ class Task:
     def create_task_json(
         fp: PathLike,
         name: str,
-        ex_files: Union[PathLike, list[PathLike]],
-        sol_files: Union[PathLike, list[PathLike]],
-        tests: Union[PathLike, list[PathLike]],
+        ex_files: Union[PathLike, list[PathLike], None] = None,
+        sol_files: Union[PathLike, list[PathLike], None] = None,
+        tests: Union[PathLike, list[PathLike], None] = None,
     ):
         """TODO
         Create a task_json from all relevant information as it would naturally be available
@@ -105,13 +105,28 @@ class Task:
         tests: Union[PathLike, list[PathLike]]
             Filename or list of filenames containing serialized tests
         """
+        fp = Path(fp)
         task: dict = {}
 
         task["name"] = name
 
-        task["ex_files"] = ex_files if isinstance(ex_files, list) else [ex_files]
-        task["sol_files"] = sol_files if isinstance(sol_files, list) else [sol_files]
-        test_files = tests if isinstance(tests, list) else [tests]
+        task["ex_files"] = (
+            ex_files
+            if isinstance(ex_files, list)
+            else [ex_files]
+            if ex_files is not None
+            else []
+        )
+        task["sol_files"] = (
+            sol_files
+            if isinstance(sol_files, list)
+            else [sol_files]
+            if sol_files is not None
+            else []
+        )
+        test_files = (
+            tests if isinstance(tests, list) else [tests] if tests is not None else []
+        )
 
         def read_file_to_string(fp: PathLike) -> str:
             with open(fp, "r") as f:
@@ -121,16 +136,14 @@ class Task:
         task["solution_code"] = [read_file_to_string(f) for f in task["sol_files"]]
         task["tests"] = [read_file_to_string(f) for f in test_files]
 
-        with open(fp, "W") as f:
+        os.makedirs(fp.parent, exist_ok=True)
+        with open(fp, "w") as f:
             json.dump(task, f)
 
 
+def create_task():
+    jsonargparse.auto_cli(Task.create_task_json)
+
+
 if __name__ == "__main__":
-    args = jsonargparse.auto_cli()
-    Task.create_task_json(
-        fp=args.fp,
-        name=args.name,
-        ex_files=args.ex_files,
-        sol_files=args.sol_files,
-        tests=args.tests,
-    )
+    create_task()
