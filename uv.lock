@@ -215,6 +215,15 @@ wheels = [
 ]
 
 [[package]]
+name = "json-tricks"
+version = "3.17.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/00/15/a4983fd782472b7968b4a0b50092981debccdd938ba4d94698bbb71b0abb/json_tricks-3.17.3.tar.gz", hash = "sha256:71561eedad7c22dde019e9a38ff8c46ebd91da789e31e2513f627dd2cbbdbf56", size = 30537, upload-time = "2023-08-19T12:08:29.487Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ae/fd/e3edcf827e7f9c17c5ea1a192841dcfb1dd575a7518c25c5cadd921625b1/json_tricks-3.17.3-py2.py3-none-any.whl", hash = "sha256:8ba11cb66a09532945c05c7374a72b857dfc3870b2d145125edd508f4027dff9", size = 27613, upload-time = "2023-08-19T12:08:27.533Z" },
+]
+
+[[package]]
 name = "jsonargparse"
 version = "4.48.0"
 source = { registry = "https://pypi.org/simple" }
@@ -432,6 +441,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fullsignatureprotocols" },
     { name = "ipykernel" },
+    { name = "json-tricks" },
     { name = "jsonargparse" },
     { name = "pyfiglet" },
     { name = "pytest" },
@@ -444,6 +454,7 @@ dependencies = [
 requires-dist = [
     { name = "fullsignatureprotocols", git = "https://github.com/johannes-langer/full-signature-protocols" },
     { name = "ipykernel", specifier = ">=7.3.0" },
+    { name = "json-tricks", specifier = ">=3.17.3" },
     { name = "jsonargparse", specifier = ">=4.48.0" },
     { name = "pyfiglet", specifier = ">=1.0.4" },
     { name = "pytest", specifier = ">=9.0.3" },

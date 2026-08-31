@@ -39,8 +39,12 @@ class PyicsItem(pytest.Item):
         return self.path, 0, f"pyics test: {self.name}"
 
 
-class TestCollectionPlugin:
-    """Injects pre-built Test objects as PyicsItems, bypassing pytest's file-based collection."""
+class LiveTestCollectionPlugin:
+    """
+    Injects pre-built Test objects as PyicsItems, bypassing pytest's file-based collection.
+
+    This plugin is used for the main pyics script.
+    """
 
     def __init__(self, test_objs: list[Test]):
         self.test_objs = test_objs
@@ -55,6 +59,30 @@ class TestCollectionPlugin:
         return (
             True  # @Claude: "short-circuits the default collection, no files are touched"
         )
+
+    def pytest_runtest_logreport(self, report):
+        self.reports.append(report)
+
+
+class NotebookCollectionPlugin:
+    """
+    Injects pre-built Test objects as PyicsItems, bypassing pytest's file-based collection.
+
+    This plugin is meant to be used in Jupyter Notebooks, e.g. the create_task notebook.
+    """
+
+    def __init__(self, test_objs):
+        self.test_objs = test_objs
+        self.reports = []
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_collection(self, session):
+        session.items = [
+            PyicsItem.from_parent(session, name=f"test_{i}", test_obj=obj)
+            for i, obj in enumerate(self.test_objs)
+        ]
+        session.testscollected = len(session.items)
+        return True  # short-circuits the default collection, no files are touched
 
     def pytest_runtest_logreport(self, report):
         self.reports.append(report)

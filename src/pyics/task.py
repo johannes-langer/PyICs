@@ -1,4 +1,3 @@
-import json
 import os
 from os import PathLike
 from pathlib import Path
@@ -6,7 +5,8 @@ from typing import Union
 
 import jsonargparse
 
-# from pyics.tests import Test
+import pyics.json_handling as json
+from pyics.tests import Test
 
 
 class Task:
@@ -86,7 +86,7 @@ class Task:
         name: str,
         ex_files: Union[PathLike, list[PathLike], None] = None,
         sol_files: Union[PathLike, list[PathLike], None] = None,
-        tests: Union[PathLike, list[PathLike], None] = None,
+        tests: Union[Test, list[Test], None] = None,
     ):
         """TODO
         Create a task_json from all relevant information as it would naturally be available
@@ -102,7 +102,7 @@ class Task:
             Filename or list of filenames of exercise files.
         sol_files: Union[str, Path, list[str | Path]]
             Filename or list of filenames of solution files.
-        tests: Union[PathLike, list[PathLike]]
+        tests: Union[Test, list[Test]]
             Filename or list of filenames containing serialized tests
         """
         fp = Path(fp)
@@ -124,9 +124,6 @@ class Task:
             if sol_files is not None
             else []
         )
-        test_files = (
-            tests if isinstance(tests, list) else [tests] if tests is not None else []
-        )
 
         def read_file_to_string(fp: PathLike) -> str:
             with open(fp, "r") as f:
@@ -134,7 +131,9 @@ class Task:
 
         task["exercise_code"] = [read_file_to_string(f) for f in task["ex_files"]]
         task["solution_code"] = [read_file_to_string(f) for f in task["sol_files"]]
-        task["tests"] = [read_file_to_string(f) for f in test_files]
+        task["tests"] = (
+            tests if isinstance(tests, list) else [tests] if tests is not None else []
+        )
 
         os.makedirs(fp.parent, exist_ok=True)
         with open(fp, "w") as f:
@@ -142,7 +141,10 @@ class Task:
 
 
 def create_task():
-    jsonargparse.auto_cli(Task.create_task_json)
+    print(
+        "The create_task script has not been set up yet. For now, use the create_task.ipynb notebook instead."
+    )
+    # jsonargparse.auto_cli(Task.create_task_json)
 
 
 if __name__ == "__main__":

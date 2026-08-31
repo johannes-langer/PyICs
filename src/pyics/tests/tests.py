@@ -6,6 +6,8 @@ from os import PathLike
 from types import ModuleType
 from typing import Any
 
+import pyics.json_handling as json
+
 
 class Test(ABC):
     """Base Class for Tests"""
@@ -38,10 +40,9 @@ class Test(ABC):
 
         return module
 
-    @abstractmethod
-    def serialize(self) -> dict:
+    def serialize(self) -> str | bytes:
         """turn this test object into a dictionary for export"""
-        ...
+        return json.dumps(self)
 
     @abstractmethod
     def run(self) -> None: ...
@@ -57,8 +58,8 @@ class SimpleTest(Test):
     """output of a function must match the desired output for some parameters"""
 
     function_name: str
-    args: list[Any]
-    kwargs: dict[str, Any]
+    function_args: list[Any]
+    function_kwargs: dict[str, Any]
     expected: Any
 
     def __init__(
@@ -70,20 +71,19 @@ class SimpleTest(Test):
         /,
         function_args: list[Any] = [],
         function_kwargs: dict[str, Any] = {},
+        **kwargs,
     ):
         self.name = name
         self.file_path = file_path
         self.function_name = function_name
-        self.args = function_args
-        self.kwargs = function_kwargs
         self.expected = expected
-
-    def serialize(self) -> dict: ...
+        self.function_args = function_args
+        self.function_kwargs = function_kwargs
 
     def run(self) -> None:
         m = self.load_solution()
         func = getattr(m, self.function_name)
-        res = func(*self.args, **self.kwargs)
+        res = func(*self.function_args, **self.function_kwargs)
 
         assert res == self.expected
 

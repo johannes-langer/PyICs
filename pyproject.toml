@@ -10,6 +10,7 @@ requires-python = ">=3.14"
 dependencies = [
     "fullsignatureprotocols",
     "ipykernel>=7.3.0",
+    "json-tricks>=3.17.3",
     "jsonargparse>=4.48.0",
     "pyfiglet>=1.0.4",
     "pytest>=9.0.3",
