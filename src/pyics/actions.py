@@ -1,32 +1,26 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Optional
 
 
 class Action(ABC):
-    """Base Class for actions to perform on key-press"""
+    """A parameterless, kwargs-bound unit of work."""
 
-    def __init__(self, name: str, key: str, ref: Optional[str] = None, **kwargs):
+    def __init__(self, name: str, **kwargs):
         """
-        Compose an action object. Note that an action object should be callable without
+        Compose an Action object. Note that an Action object should be callable without
         parameters (refer to how kwargs are used).
 
         Parameters
         ----------
         name: str
             Name of the Action
-        key: str
-            Hotkey associated with the action
-        ref: str (optional)
-            Optional key reference, in case the actual key-press is unwieldy.
         **kwargs
             kwargs to encode call parameters to specific values.
         """
         self.name = name
-        self.key = key
-        self.ref = ref if ref else self.key
         self.kwargs = kwargs
 
-    def __call__(self) -> None:
+    def __call__(self):
         self.exec(**self.kwargs)
 
     @staticmethod
@@ -34,7 +28,34 @@ class Action(ABC):
     def exec(**kwargs) -> None: ...
 
 
-class Quit(Action):
+class KeyAction(Action):
+    """An Action bound to a hotkey"""
+
+    def __init__(self, name: str, key: str, ref: Optional[str] = None, **kwargs):
+        """
+        Compose a KeyAction object. Note that an Action object should be callable without
+        parameters (refer to how kwargs are used).
+
+        Parameters
+        ----------
+        name: str
+            Name of the KeyAction
+        key: str
+            Hotkey associated with the action
+        ref: str (optional)
+            Optional key reference, in case the actual key-press is unwieldy.
+        **kwargs
+            kwargs to encode call parameters to specific values.
+        """
+        super().__init__(name, **kwargs)
+        self.key = key
+        self.ref = ref if ref else self.key
+
+    def __call__(self) -> None:
+        self.exec(**self.kwargs)
+
+
+class Quit(KeyAction):
     """
     Quit application on ctrl-c press
     """
@@ -59,7 +80,7 @@ class Quit(Action):
         pyics.running = False
 
 
-class Demo(Action):
+class Demo(KeyAction):
     """
     Perform a demo action
     """
@@ -79,7 +100,7 @@ class Demo(Action):
         cli.update_main_content("[dim]The hotkey for the demo action has been pressed.")
 
 
-class Next(Action):
+class Next(KeyAction):
     """Move to the next task."""
 
     def __init__(self, name: str = "Next", key: str = "n", **kwargs):
@@ -91,7 +112,7 @@ class Next(Action):
         ...
 
 
-class Previous(Action):
+class Previous(KeyAction):
     """Go back to the previous task."""
 
     def __init__(self, name: str = "Previous", key: str = "p", **kwargs):
@@ -103,7 +124,7 @@ class Previous(Action):
         ...
 
 
-class ResetTask(Action):
+class ResetTask(KeyAction):
     """Reset the current task."""
 
     def __init__(self, name: str = "Reset Task", key: str = "r", **kwargs):

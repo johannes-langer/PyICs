@@ -6,7 +6,7 @@ from typing import Any
 
 from jsonargparse import Namespace
 
-from pyics.actions import Action, Demo, Quit
+from pyics.actions import Action, KeyAction, Demo, Quit
 from pyics.cli import CLI
 from pyics.key_listener import hey_listen
 
@@ -17,16 +17,16 @@ class PyIC:
     def __init__(self, cli: CLI):
         self.cli = cli
         self.running = False
-        self.actions: dict[str, Action] = {}
+        self.key_actions: dict[str, KeyAction] = {}
 
         self._register_actions()
-        self.cli.update_hotkeys({a.ref: a.name for a in self.actions.values()})
+        self.cli.update_hotkeys({a.ref: a.name for a in self.key_actions.values()})
 
     def _register_actions(self) -> None:
         """ """
-        actions: list[Action] = [Quit(cli=self.cli, pyics=self), Demo(cli=self.cli)]
-        for a in actions:
-            self.actions[a.key] = a
+        key_actions: list[KeyAction] = [Quit(cli=self.cli, pyics=self), Demo(cli=self.cli)]
+        for a in key_actions:
+            self.key_actions[a.key] = a
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         """ """
@@ -56,7 +56,7 @@ class PyIC:
         try:
             key = q.get_nowait()
 
-            self.actions.get(key, lambda: ...)()
+            self.key_actions.get(key, lambda: ...)()
 
         except queue.Empty:
             pass

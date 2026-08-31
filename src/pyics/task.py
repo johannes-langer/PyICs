@@ -3,18 +3,23 @@ from os import PathLike
 from pathlib import Path
 from typing import Union
 
-import jsonargparse
+import pytest
+from pytest import TestReport
 
 import pyics.json_handling as json
 from pyics.tests import Test
+from pyics.tests.pytest_integration import LiveTestCollectionPlugin
 
 
 class Task:
     """Unified Task Representation"""
 
+    __status: str
+    __info: str
+
     def __init__(self, task_file: str | Path):
         """
-        Parses a task form a task json-file.
+        Parses a task from a task json-file.
 
         Parameters
         ----------
@@ -28,35 +33,67 @@ class Task:
         self.exercise_files: list[Path] = [Path(fp) for fp in raw_json["ex_files"]]
         self.solution_files: list[Path] = [Path(fp) for fp in raw_json["sol_files"]]
 
+        # The solution and exercise code does not need to be in memory
         self.create_files(raw_json["exercise_code"], raw_json["solution_code"])
 
-        # TODO: Do this properly. Probably use custon json serialization like I did in the trains dataset.
-        # self.tests: list[Test] = [Test(test_dict) for test_dict in raw_json["tests"]]
+        self.tests: list[Test] = raw_json["tests"]
+        self.test_results: list[TestReport] = []
 
         self.last_mtimes = {
             f: os.path.getmtime(f) for f in self.exercise_files if os.path.exists(f)
         }
 
-    def check_file_changes(self) -> None:
+    @property
+    def info(self) -> str:
+        """The task info, i.e. what is supposed to be displayed in the pyics header"""
+        return self.__info
+
+    @property
+    def status(self) -> str:
+        """The task status, i.e. what is supposed to be displayed in the pyics main panel"""
+        return self.__status
+
+    def check_file_changes(self) -> bool:
         """
         Check whether an exercise file has been changed by monitoring the last modified
         timestamp.
-        """
-        for filepath in self.exercise_files:
-            self._check_file_changed(filepath)
 
-    def _check_file_changed(self, filepath: Path):
-        """ """
+        Returns
+        -------
+        bool
+            True if any exercise file has been changed
+        """
+        changed = map(self._check_file_changed, self.exercise_files)
+        return any(changed)
+
+    def _check_file_changed(self, filepath: Path) -> bool:
+        """
+        Check whether a single exercise file has been changed by monitoring the last
+        modified timestamp.
+
+        Returns
+        -------
+        bool
+            True if the file has been changed, False otherwise
+        """
         if not os.path.exists(filepath):
-            pass
+            return False
 
         current_mtime = os.path.getmtime(filepath)
         if current_mtime > self.last_mtimes.get(filepath, 0):
             self.last_mtimes[filepath] = current_mtime
-            self.run_file_on_change(filepath)
+            return True
 
-    def run_file_on_change(self, filepath: Path) -> None:
-        """ """
+        return False
+
+    def run_tests(self) -> None:
+        """
+        Runs all tests in self.tests using pytest and stores the unfiltered reports in
+        self.test_results.
+        """
+        plugin = LiveTestCollectionPlugin(self.tests)
+        pytest.main(["-q"], plugins=[plugin])
+        self.test_results = plugin.reports
 
     def create_files(self, exercise_code: list[str], solution_code: list[str]) -> None:
         """

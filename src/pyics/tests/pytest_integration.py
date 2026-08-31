@@ -2,6 +2,7 @@ from os import PathLike
 from typing import Literal
 
 import pytest
+from pytest import TestReport
 from _pytest._code.code import TerminalRepr
 from _pytest.nodes import Node
 
