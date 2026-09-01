@@ -1,26 +1,50 @@
-import json
+import itertools
+from pathlib import Path
 import queue
 import threading
 import time
 from typing import Any
 
-from jsonargparse import Namespace
 
-from pyics.actions import Action, KeyAction, Demo, Quit
+from pyics.actions import Demo, KeyAction, Quit
 from pyics.cli import CLI
 from pyics.key_listener import hey_listen
+from pyics.task import Task
 
 
 class PyIC:
     """PyIC main thread"""
 
+    __current_task: Task | None
+
     def __init__(self, cli: CLI):
+        self.cwd = Path.cwd()
         self.cli = cli
         self.running = False
         self.key_actions: dict[str, KeyAction] = {}
+        self.__current_task: Task | None = None
+        self.tasks: list[Task] = []
+
+        self._find_tasks()
 
         self._register_actions()
         self.cli.update_hotkeys({a.ref: a.name for a in self.key_actions.values()})
+
+    def _find_tasks(self, max_depth: int = 2) -> None:
+        """TODO: This is indev behavior. Future application should have courses composed
+        of tasks. If anything, top-level should find courses (see Obsidian Notes).
+
+        Search the current working directory for task json files.
+
+        Parameters
+        ----------
+        max_depth: int (optional)
+            Set the maximum depth to walk the directory. For example, with the default
+            value (2), this method would find ``./subdir/subsubdir/task.json``, but not
+            ``./subdir/subsubdir/subsubsubdir/task.json``.
+        """
+        globs = [self.cwd.glob(f"{'*/' * d}*.pyicstask.json") for d in range(max_depth + 1)]
+        self.tasks = [Task(p) for p in sorted(itertools.chain(*globs))]
 
     def _register_actions(self) -> None:
         """ """
@@ -33,6 +57,10 @@ class PyIC:
         self.running = True
         self.thread = threading.Thread(target=self.run)
         self.thread.start()
+
+    @property
+    def current_task(self) -> Task | None:
+        return self.__current_task
 
     @hey_listen("q")
     def run(self, q: queue.Queue[str]):

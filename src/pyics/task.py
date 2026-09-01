@@ -1,3 +1,5 @@
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import os
 from os import PathLike
 from pathlib import Path
@@ -29,29 +31,45 @@ class Task:
         with open(task_file, "r") as f:
             raw_json: dict = json.load(f)
 
-        self.name = raw_json["name"]
-        self.exercise_files: list[Path] = [Path(fp) for fp in raw_json["ex_files"]]
-        self.solution_files: list[Path] = [Path(fp) for fp in raw_json["sol_files"]]
+        self.name: str = raw_json.get("name", "Task")
+        self.instructions: str = raw_json.get("instructions", "")
+
+        self.exercise_files: list[Path] = [Path(fp) for fp in raw_json.get("ex_files", [])]
+        self.solution_files: list[Path] = [Path(fp) for fp in raw_json.get("sol_files", [])]
 
         # The solution and exercise code does not need to be in memory
         self.create_files(raw_json["exercise_code"], raw_json["solution_code"])
 
         self.tests: list[Test] = raw_json["tests"]
-        self.test_results: list[TestReport] = []
 
         self.last_mtimes = {
             f: os.path.getmtime(f) for f in self.exercise_files if os.path.exists(f)
         }
+
+        self.info = self.instructions
+        self.run_tests()
+        self.update_status()
 
     @property
     def info(self) -> str:
         """The task info, i.e. what is supposed to be displayed in the pyics header"""
         return self.__info
 
+    @info.setter
+    def info(self, v: str) -> None:
+        """The task info, i.e. what is supposed to be displayed in the pyics header"""
+        self.__info = v
+
     @property
     def status(self) -> str:
         """The task status, i.e. what is supposed to be displayed in the pyics main panel"""
         return self.__status
+
+    def update_status(self) -> None:
+        """Update the status from the test reports"""
+        self.__status = "\n\n".join([
+            rep.longreprtext for rep in self.test_results if rep.when == "call"
+        ])
 
     def check_file_changes(self) -> bool:
         """
@@ -92,8 +110,14 @@ class Task:
         self.test_results.
         """
         plugin = LiveTestCollectionPlugin(self.tests)
-        pytest.main(["-q"], plugins=[plugin])
+
+        f = io.StringIO()
+        with redirect_stdout(f), redirect_stderr(f):
+            pytest.main(["-p", "no:terminal"], plugins=[plugin])
+
+        self.test_summary = f.getvalue()
         self.test_results = plugin.reports
+        self.update_status()
 
     def create_files(self, exercise_code: list[str], solution_code: list[str]) -> None:
         """
@@ -121,6 +145,7 @@ class Task:
     def create_task_json(
         fp: PathLike,
         name: str,
+        instructions: str,
         ex_files: Union[PathLike, list[PathLike], None] = None,
         sol_files: Union[PathLike, list[PathLike], None] = None,
         tests: Union[Test, list[Test], None] = None,
@@ -135,6 +160,8 @@ class Task:
             Desired output path
         name: str
             Name of the task
+        instructions: str
+            Instructions for the task
         ex_files: Union[str, Path, list[str | Path]]
             Filename or list of filenames of exercise files.
         sol_files: Union[str, Path, list[str | Path]]
@@ -146,6 +173,7 @@ class Task:
         task: dict = {}
 
         task["name"] = name
+        task["instructions"] = instructions
 
         task["ex_files"] = (
             ex_files
@@ -174,7 +202,7 @@ class Task:
 
         os.makedirs(fp.parent, exist_ok=True)
         with open(fp, "w") as f:
-            json.dump(task, f)
+            json.dump(task, f, indent=4)
 
 
 def create_task():
