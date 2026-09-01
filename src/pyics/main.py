@@ -7,6 +7,12 @@ from pyics.pyics import PyIC
 
 
 def main():
+    # This is necessary because otherwise pytest.main() imports it and then subsequently
+    # breaks our shutdown mechanic by taking control of tty.
+    try:
+        import readline
+    except ImportError:
+        pass
 
     sys.stdout.write(ALT_SCREEN_ENTER)
     sys.stdout.flush()
