@@ -97,7 +97,10 @@ class Demo(KeyAction):
     @staticmethod
     def exec(**kwargs) -> None:
         cli = kwargs["cli"]
-        cli.update_main_content("[dim]The hotkey for the demo action has been pressed.")
+        pyics = kwargs["pyics"]
+        pyics.next_task()
+        cli.update_main_content(pyics.current_task.status)
+        cli.update_info(pyics.current_task.info)
 
 
 class Next(KeyAction):

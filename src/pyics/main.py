@@ -18,7 +18,6 @@ def main():
 
     try:
         pyics()
-
     finally:
         sys.stdout.write(ALT_SCREEN_LEAVE)
         sys.stdout.flush()

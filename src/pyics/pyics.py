@@ -23,7 +23,7 @@ class PyIC:
         self.running = False
         self.key_actions: dict[str, KeyAction] = {}
         self.__current_task: Task | None = None
-        self.tasks: list[Task] = []
+        self.tasks: list[Path] = []
 
         self._find_tasks()
 
@@ -44,11 +44,14 @@ class PyIC:
             ``./subdir/subsubdir/subsubsubdir/task.json``.
         """
         globs = [self.cwd.glob(f"{'*/' * d}*.pyicstask.json") for d in range(max_depth + 1)]
-        self.tasks = [Task(p) for p in sorted(itertools.chain(*globs))]
+        self.tasks = sorted(itertools.chain(*globs))
 
     def _register_actions(self) -> None:
         """ """
-        key_actions: list[KeyAction] = [Quit(cli=self.cli, pyics=self), Demo(cli=self.cli)]
+        key_actions: list[KeyAction] = [
+            Quit(cli=self.cli, pyics=self),
+            Demo(cli=self.cli, pyics=self),
+        ]
         for a in key_actions:
             self.key_actions[a.key] = a
 
@@ -60,7 +63,23 @@ class PyIC:
 
     @property
     def current_task(self) -> Task | None:
+        """
+        TODO: In the future, this should point to the current task of the active course.
+        Ensure this works dynamically.
+        """
         return self.__current_task
+
+    def next_task(self) -> None:
+        """
+        Choose the next task in the self.tasks iteratable. Specifically load the task now
+        to avoid populating memory with fully loaded tasks.
+        """
+        if self.current_task is None:
+            self.__current_task = Task(self.tasks[0])
+        else:
+            self.__current_task = Task(
+                self.tasks[self.tasks.index(Path(self.current_task.path)) + 1]
+            )
 
     @hey_listen("q")
     def run(self, q: queue.Queue[str]):
@@ -69,6 +88,11 @@ class PyIC:
 
         while self.running:
             self.check_keypress(q)
+            if self.current_task is not None and self.current_task.check_file_changes():
+                self.current_task.run_tests()
+            if self.current_task is not None and self.current_task.new_test_results:
+                self.cli.update_main_content(self.current_task.status)
+                self.current_task.clear_test_results()
 
             time.sleep(0.05)
 

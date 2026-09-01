@@ -3,10 +3,12 @@ import io
 import os
 from os import PathLike
 from pathlib import Path
+import threading
 from typing import Union
 
 import pytest
-from pytest import TestReport
+from rich.console import RenderableType
+from rich.text import Text
 
 import pyics.json_handling as json
 from pyics.tests import Test
@@ -16,8 +18,9 @@ from pyics.tests.pytest_integration import LiveTestCollectionPlugin
 class Task:
     """Unified Task Representation"""
 
-    __status: str
-    __info: str
+    __status: RenderableType
+    __info: RenderableType
+    __new_test_results: bool = False
 
     def __init__(self, task_file: str | Path):
         """
@@ -28,6 +31,7 @@ class Task:
         task_file: str | Path
             Path to the task file
         """
+        self.__path = task_file
         with open(task_file, "r") as f:
             raw_json: dict = json.load(f)
 
@@ -46,12 +50,32 @@ class Task:
             f: os.path.getmtime(f) for f in self.exercise_files if os.path.exists(f)
         }
 
-        self.info = self.instructions
+        self.__info = self.instructions
+        self.__status = Text("tests pending...", style="dim")
+        self.test_results: list[pytest.TestReport] = []
+
+        self._tests_lock = threading.Lock()
+        self._tests_pending = False
+
         self.run_tests()
-        self.update_status()
 
     @property
-    def info(self) -> str:
+    def new_test_results(self) -> bool:
+        return self.__new_test_results
+
+    def clear_test_results(self) -> None:
+        """
+        Set new_test_results to False, indicating that the new results have been
+        processed.
+        """
+        self.__new_test_results = False
+
+    @property
+    def path(self) -> str | Path:
+        return self.__path
+
+    @property
+    def info(self) -> RenderableType:
         """The task info, i.e. what is supposed to be displayed in the pyics header"""
         return self.__info
 
@@ -61,14 +85,16 @@ class Task:
         self.__info = v
 
     @property
-    def status(self) -> str:
+    def status(self) -> RenderableType:
         """The task status, i.e. what is supposed to be displayed in the pyics main panel"""
         return self.__status
 
     def update_status(self) -> None:
         """Update the status from the test reports"""
         self.__status = "\n\n".join([
-            rep.longreprtext for rep in self.test_results if rep.when == "call"
+            r.longreprtext
+            for r in self.test_results
+            if r.when == "call" and r.outcome == "failed"
         ])
 
     def check_file_changes(self) -> bool:
@@ -108,16 +134,33 @@ class Task:
         """
         Runs all tests in self.tests using pytest and stores the unfiltered reports in
         self.test_results.
+
+        Starts self.__run_tests as a daemon thread.
         """
-        plugin = LiveTestCollectionPlugin(self.tests)
+        self._tests_pending = True
+        if not self._tests_lock.acquire(blocking=False):
+            return
+        threading.Thread(target=self.__run_tests, daemon=True).start()
 
-        f = io.StringIO()
-        with redirect_stdout(f), redirect_stderr(f):
-            pytest.main(["-p", "no:terminal"], plugins=[plugin])
+    def __run_tests(self) -> None:
+        """
+        DO NOT CALL THIS METHOD DIRECTLY. CALL run_tests INSTEAD.
 
-        self.test_summary = f.getvalue()
-        self.test_results = plugin.reports
-        self.update_status()
+        Runs all tests in self.tests synchronously using pytest and stores the unfiltered
+        reports in self.test_results.
+        """
+        try:
+            while self._tests_pending:
+                self._tests_pending = False
+                plugin = LiveTestCollectionPlugin(self.tests)
+
+                pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
+
+                self.test_results = plugin.reports
+                self.update_status()
+                self.__new_test_results = True
+        finally:
+            self._tests_lock.release()
 
     def create_files(self, exercise_code: list[str], solution_code: list[str]) -> None:
         """
@@ -182,6 +225,7 @@ class Task:
             if ex_files is not None
             else []
         )
+        task["ex_files"] = [Path(f).absolute() for f in task["ex_files"]]
         task["sol_files"] = (
             sol_files
             if isinstance(sol_files, list)
@@ -189,6 +233,7 @@ class Task:
             if sol_files is not None
             else []
         )
+        task["sol_files"] = [Path(f).absolute() for f in task["sol_files"]]
 
         def read_file_to_string(fp: PathLike) -> str:
             with open(fp, "r") as f:
