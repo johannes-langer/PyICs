@@ -10,6 +10,7 @@ from rich import box
 from rich.align import Align
 from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
+from rich.padding import Padding
 from rich.progress import BarColumn, Progress, TextColumn
 from rich.table import Table
 from rich.text import Text
@@ -39,11 +40,13 @@ class CLI:
         )
         self.task_id = self.progress.add_task("Progress", total=1)
         self.hotkeys = {}
-        self.info_text = "Ready."
-        self.main_content = Text("Main program outputs will appear here...", style="dim")
-        self.percentage = 0.0
 
-        self._needs_redraw = True
+        self.update_info("Ready")
+        self.update_main_content(
+            Text("Main program outputs will appear here...", style="dim"), "Main Output"
+        )
+        self.update_progress(0.0)
+
         signal.signal(signal.SIGWINCH, self._handle_resize)
 
     def _handle_resize(self, signum, frame):
@@ -106,7 +109,7 @@ class CLI:
 
         return Panel(group, border_style="blue", box=box.ROUNDED)
 
-    def update_main_content(self, renderable: RenderableType):
+    def update_main_content(self, renderable: RenderableType, title: str = ""):
         """
         Update the content of the main panel.
 
@@ -114,8 +117,27 @@ class CLI:
         ----------
         renderable: RenderableType
             New content to put inside the main panel.
+        title: str (optional)
+            Set a frame title for the main content. If a title other than "" (default)
+            is provided, adds top padding to renderable.
         """
-        self.main_content = renderable
+        self.main_content = Padding(renderable, (0 if title == "" else 1, 0, 0, 0))
+        self.main_title = title
+        self._needs_redraw = True
+
+    def add_to_main_content(self, renderable: RenderableType) -> None:
+        """
+        _Add_ renderable below current main content.
+
+        **Important:** anything added to the main content this way will be overwritten
+        the next time a `ùpdate_main_content`` method call occurs.
+
+        Parameters
+        ----------
+        renderable: RenderableType
+            New content to _add_ to the main content.
+        """
+        self.main_content = Group(self.main_content, Padding(renderable, (1, 0, 0, 0)))
         self._needs_redraw = True
 
     def update_progress(self, percentage: float):
@@ -166,7 +188,7 @@ class CLI:
 
         main_panel = Panel(
             self.main_content,
-            title="Main Output",  # should display task-id/task-number later
+            title=self.main_title,  # should display task-id/task-number later
             title_align="left",
             box=box.SIMPLE,
         )

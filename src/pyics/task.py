@@ -7,7 +7,10 @@ import threading
 from typing import Union
 
 import pytest
-from rich.console import RenderableType
+from rich.console import Group, RenderableType
+from rich.padding import Padding
+from rich.rule import Rule
+from rich.table import Table
 from rich.text import Text
 
 import pyics.json_handling as json
@@ -92,13 +95,71 @@ class Task:
 
     def update_status(self) -> None:
         """Update the status from the test reports"""
-        self.__status = Text(
-            "\n\n".join([
-                r.longreprtext
-                for r in self.test_results
-                if r.when == "call" and r.outcome == "failed"
-            ])
+        # filter tests for only call tests
+        relevant_reports = [r for r in self.test_results if r.when == "call"]
+        passed = [r.outcome == "passed" for r in relevant_reports]
+        failed_reports = [r for r in relevant_reports if r.outcome == "failed"]
+        pass_rate = round(100 * sum(passed) / len(passed)) if passed else 0
+
+        # result summary, box=None so the row reaches the panel's own border
+        summary = Table(expand=True, show_header=False, box=None, padding=0)
+        summary.add_column()
+        summary.add_column(justify="right")
+        summary.add_row(
+            "".join("[bright_green].[/]" if ok else "[bright_red]F[/]" for ok in passed),
+            f"[{'bright_green' if pass_rate == 100 else 'bright_red'}]{pass_rate}%[/]",
         )
+
+        sections: list[RenderableType] = [summary]
+
+        if failed_reports:
+            # one rule + traceback per failure, mirroring pytest's own failure sections
+            sections.append(
+                Padding(Rule("[white]FAILURES[/]", style="white"), pad=(1, 0, 0, 0))
+            )
+            sections += [
+                Group(
+                    Padding(
+                        Rule(f"[bold bright_red]{r.nodeid}[/]", style="bright_red"),
+                        pad=(1, 0, 0, 0),
+                    ),
+                    Text(r.longreprtext, style="red"),
+                )
+                for r in failed_reports
+            ]
+
+            # pytest's "short test summary info", one line per failed test
+            sections.append(
+                Padding(
+                    Rule("[bright_cyan]short test summary info[/]", style="bright_cyan"),
+                    pad=(1, 0, 0, 0),
+                )
+            )
+            sections += [
+                Text(
+                    f"FAILED {r.nodeid} - {' '.join(r.longreprtext.splitlines())}",
+                    style="bright_red",
+                )
+                for r in failed_reports
+            ]
+
+        if relevant_reports:
+            n_failed, n_passed = len(failed_reports), sum(passed)
+            duration = sum(r.duration for r in relevant_reports)
+
+            counts = Text()
+            if n_failed:
+                counts.append(f"{n_failed} failed", style="bold bright_red")
+            if n_failed and n_passed:
+                counts.append(", ", style="white")
+            if n_passed:
+                counts.append(f"{n_passed} passed", style="bright_green")
+            counts.append(
+                f" in {duration:.2f}s", style="bright_red" if n_failed else "bright_green"
+            )
+            sections.append(Padding(counts, pad=(1, 0, 0, 0)))
+
+        self.__status = Group(*sections)
 
     def check_file_changes(self) -> bool:
         """
