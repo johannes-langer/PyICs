@@ -14,7 +14,7 @@ from rich.padding import Padding
 from rich.progress import BarColumn, Progress, TextColumn
 from rich.segment import Segment
 from rich.table import Table
-from rich.text import Text
+from rich.text import Text, TextType
 
 LINE_UP = "\033[1A"
 LINE_CLEAR = "\x1b[2K"
@@ -114,7 +114,7 @@ class CLI:
 
         return Panel(group, border_style="blue", box=box.ROUNDED)
 
-    def update_main_content(self, renderable: RenderableType, title: str = ""):
+    def update_main_content(self, renderable: RenderableType, title: TextType = ""):
         """
         Update the content of the main panel.
 
@@ -122,7 +122,7 @@ class CLI:
         ----------
         renderable: RenderableType
             New content to put inside the main panel.
-        title: str (optional)
+        title: TextType (optional)
             Set a frame title for the main content. If a title other than "" (default)
             is provided, adds top padding to renderable.
         """

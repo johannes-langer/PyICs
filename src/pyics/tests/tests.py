@@ -4,11 +4,13 @@ from abc import ABC, abstractmethod
 from importlib.machinery import ModuleSpec
 from os import PathLike
 from types import ModuleType
-from typing import Any
+from typing import Any, Protocol
 
+from FullSignatureProtocols.FullSignatureProtocols import FullSignatureProtocol
 from _pytest.assertion.util import assertrepr_compare, dummy_highlighter
 
 import pyics.json_handling as json
+from pyics.tests.capture import capture_stdout
 
 
 class Test(ABC):
@@ -53,7 +55,29 @@ class Test(ABC):
 class PrintTest(Test):
     """console output of file needs to match"""
 
-    def __init__(self, test_dict: dict): ...
+    expected: str  # printout is necessarily str
+
+    def __init__(self, name: str, file_path: PathLike, expected: str, **kwargs):
+        self.name = name
+        self.file_path = file_path
+        self.expected = expected
+
+    def run(self) -> None:
+        with capture_stdout() as buffer:
+            self.load_solution()
+        if (res := buffer.getvalue()) != self.expected:
+            expl = list(
+                assertrepr_compare(
+                    "==",
+                    res,
+                    self.expected,
+                    verbose=1,
+                    highlighter=dummy_highlighter,
+                    assertion_text_diff_style="ndiff",
+                )
+            ) or [f"{res!r} == {self.expected!r}"]
+
+            raise AssertionError("\n".join(expl))
 
 
 class SimpleTest(Test):
@@ -111,7 +135,30 @@ class StructureTest(Test):
 class ProtocolTest(Test):
     """symbols in file match some protocol"""
 
-    def __init__(self, test_dict: dict): ...
+    symbol_name: str
+
+    def __init__(
+        self,
+        name: str,
+        file_path: PathLike,
+        symbol_name: str,
+        expected,
+        **kwargs,
+    ):
+        self.name = name
+        self.file_path = file_path
+        self.symbol_name = symbol_name
+        self.expected = expected
+
+        if not self.expected._is_protocol or not self.expected._is_runtime_protocol:
+            raise TypeError("expected must be a Protocol.")
+
+    def run(self) -> None:
+        m = self.load_solution()
+        symb = getattr(m, self.symbol_name)
+
+        if not isinstance(symb, self.expected):
+            raise AssertionError()
 
 
 class SizeTest(Test):

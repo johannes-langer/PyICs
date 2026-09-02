@@ -5,6 +5,8 @@ import threading
 import time
 from typing import Any
 
+from rich.text import Text
+
 
 from pyics.actions import Demo, KeyAction, Quit, ScrollDown, ScrollUp
 from pyics.cli import CLI
@@ -93,7 +95,10 @@ class PyIC:
             if self.current_task is not None and self.current_task.check_file_changes():
                 self.current_task.run_tests()
             if self.current_task is not None and self.current_task.new_test_results:
-                self.cli.update_main_content(self.current_task.status)
+                self.cli.update_main_content(
+                    self.current_task.status,
+                    Text(self.current_task.exercise_files[0].as_posix(), style="dim"),
+                )
                 self.current_task.clear_test_results()
 
             time.sleep(0.05)

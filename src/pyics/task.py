@@ -1,8 +1,8 @@
-from contextlib import redirect_stderr, redirect_stdout
-import io
 import os
 from os import PathLike
 from pathlib import Path
+import sys
+import termios
 import threading
 from typing import Union
 
@@ -218,7 +218,15 @@ class Task:
                 self._tests_pending = False
                 plugin = LiveTestCollectionPlugin(self.tests)
 
+                try:
+                    tty_attrs = termios.tcgetattr(sys.stdin.fileno())
+                except termios.error, ValueError:
+                    tty_attrs = None
+
                 pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
+
+                if tty_attrs is not None:
+                    termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, tty_attrs)
 
                 self.test_results = plugin.reports
 
