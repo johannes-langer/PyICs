@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
+from pyics.logging import get_logger
+
 
 class Action(ABC):
     """A parameterless, kwargs-bound unit of work."""
@@ -21,6 +23,7 @@ class Action(ABC):
         self.kwargs = kwargs
 
     def __call__(self):
+        get_logger(__name__).info(f"Triggered {self.name} action.")
         self.exec(**self.kwargs)
 
     @staticmethod

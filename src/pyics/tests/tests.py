@@ -6,6 +6,8 @@ from os import PathLike
 from types import ModuleType
 from typing import Any
 
+from _pytest.assertion.util import assertrepr_compare, dummy_highlighter
+
 import pyics.json_handling as json
 
 
@@ -85,7 +87,19 @@ class SimpleTest(Test):
         func = getattr(m, self.function_name)
         res = func(*self.function_args, **self.function_kwargs)
 
-        assert res == self.expected
+        if res != self.expected:
+            expl = list(
+                assertrepr_compare(
+                    "==",
+                    res,
+                    self.expected,
+                    verbose=1,
+                    highlighter=dummy_highlighter,
+                    assertion_text_diff_style="ndiff",
+                )
+            ) or [f"{res!r} == {self.expected!r}"]
+
+            raise AssertionError("\n".join(expl))
 
 
 class StructureTest(Test):

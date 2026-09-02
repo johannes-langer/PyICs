@@ -11,6 +11,7 @@ from rich.console import RenderableType
 from rich.text import Text
 
 import pyics.json_handling as json
+from pyics.logging import get_logger
 from pyics.tests import Test
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin
 
@@ -91,11 +92,13 @@ class Task:
 
     def update_status(self) -> None:
         """Update the status from the test reports"""
-        self.__status = "\n\n".join([
-            r.longreprtext
-            for r in self.test_results
-            if r.when == "call" and r.outcome == "failed"
-        ])
+        self.__status = Text(
+            "\n\n".join([
+                r.longreprtext
+                for r in self.test_results
+                if r.when == "call" and r.outcome == "failed"
+            ])
+        )
 
     def check_file_changes(self) -> bool:
         """
@@ -157,6 +160,13 @@ class Task:
                 pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
 
                 self.test_results = plugin.reports
+
+                # log reports
+                logger = get_logger(__name__)
+                for rep in self.test_results:
+                    logger.debug(f"{rep.nodeid} {rep.when} {rep.outcome}")
+                    logger.debug(rep.longreprtext)
+
                 self.update_status()
                 self.__new_test_results = True
         finally:

@@ -1,18 +1,23 @@
-import queue
+from os import PathLike
+from pathlib import Path
 import sys
-import time
+
+import jsonargparse
 
 from pyics.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI
+from pyics.logging import setup_logging
 from pyics.pyics import PyIC
 
 
-def main():
+def main(*, log_level: str | int = 50, log_file: PathLike = Path("./.pyics.log")):
     # This is necessary because otherwise pytest.main() imports it and then subsequently
     # breaks our shutdown mechanic by taking control of tty.
     try:
         import readline
     except ImportError:
         pass
+
+    setup_logging(log_level, log_file)
 
     sys.stdout.write(ALT_SCREEN_ENTER)
     sys.stdout.flush()
@@ -29,5 +34,9 @@ def main():
         sys.stdout.flush()
 
 
+def run():
+    jsonargparse.auto_cli(main)
+
+
 if __name__ == "__main__":
-    main()
+    run()
