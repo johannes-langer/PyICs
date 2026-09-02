@@ -12,6 +12,7 @@ from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
 from rich.padding import Padding
 from rich.progress import BarColumn, Progress, TextColumn
+from rich.segment import Segment
 from rich.table import Table
 from rich.text import Text
 
@@ -40,6 +41,10 @@ class CLI:
         )
         self.task_id = self.progress.add_task("Progress", total=1)
         self.hotkeys = {}
+
+        # main-content viewport scroll state, in lines
+        self.scroll_offset = 0
+        self._max_scroll_offset = 0
 
         self.update_info("Ready")
         self.update_main_content(
@@ -178,10 +183,38 @@ class CLI:
         self.info_text = text
         self._needs_redraw = True
 
+    def scroll(self, delta: int) -> None:
+        """
+        Move the main-content viewport by ``delta`` lines, clamped to the scrollable range.
+
+        Parameters
+        ----------
+        delta: int
+            Number of lines to scroll by. Positive scrolls down, negative scrolls up.
+        """
+        self.scroll_offset = max(
+            0, min(self.scroll_offset + delta, self._max_scroll_offset)
+        )
+        self._needs_redraw = True
+
+    def _render_lines(self, renderable: RenderableType) -> list[list[Segment]]:
+        """Render a renderable to its lines, uncropped by the console's current height."""
+        options = self.console.options.update(height=None)
+        return self.console.render_lines(renderable, options, pad=False)
+
+    def _lines_to_text(self, lines: list[list[Segment]]) -> str:
+        """Join rendered lines back into a single ANSI-encoded string."""
+        segments: list[Segment] = []
+        for i, line in enumerate(lines):
+            if i:
+                segments.append(Segment.line())
+            segments.extend(line)
+        return self.console._render_buffer(segments)
+
     def draw_interface(self):
         """
-        Draw the PyICs interface. Composes header, footer, and main panel from the object's
-        attributes.
+        Draw the PyICs interface. Header and footer are pinned to the top/bottom of the
+        terminal; only the main content scrolls, windowed to the space left between them.
         """
         header_panel = self.generate_header()
         footer_panel = self.generate_footer()
@@ -193,12 +226,26 @@ class CLI:
             box=box.SIMPLE,
         )
 
-        sys.stdout.write("\033[H\033[2J")
-        sys.stdout.flush()
+        term_height = self.console.size.height
 
-        self.console.print(header_panel)
-        self.console.print(main_panel)
-        self.console.print(footer_panel)
+        header_lines = self._render_lines(header_panel)
+        footer_lines = self._render_lines(footer_panel)
+        viewport_height = max(0, term_height - len(header_lines) - len(footer_lines))
+
+        main_lines = self._render_lines(main_panel)
+        self._max_scroll_offset = max(0, len(main_lines) - viewport_height)
+        self.scroll_offset = max(0, min(self.scroll_offset, self._max_scroll_offset))
+        visible_main_lines = main_lines[
+            self.scroll_offset : self.scroll_offset + viewport_height
+        ]
+
+        sys.stdout.write("\033[H\033[2J")
+        sys.stdout.write(self._lines_to_text(header_lines))
+        sys.stdout.write("\n")
+        sys.stdout.write(self._lines_to_text(visible_main_lines))
+        sys.stdout.write(f"\033[{term_height - len(footer_lines) + 1};1H")
+        sys.stdout.write(self._lines_to_text(footer_lines))
+        sys.stdout.flush()
         self._needs_redraw = False
 
     def run(self):

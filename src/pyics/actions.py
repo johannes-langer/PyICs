@@ -140,3 +140,29 @@ class ResetTask(KeyAction):
     def exec(**kwargs) -> None:
         """TODO"""
         ...
+
+
+class ScrollUp(KeyAction):
+    """Scroll the main content viewport up."""
+
+    def __init__(
+        self, name: str = "Scroll", key: str = "UP", ref: str = "\u2191/\u2193", **kwargs
+    ):
+        super().__init__(name, key, ref=ref, **kwargs)
+
+    @staticmethod
+    def exec(**kwargs) -> None:
+        kwargs["cli"].scroll(-1)
+
+
+class ScrollDown(KeyAction):
+    """Scroll the main content viewport down."""
+
+    def __init__(
+        self, name: str = "Scroll", key: str = "DOWN", ref: str = "\u2191/\u2193", **kwargs
+    ):
+        super().__init__(name, key, ref=ref, **kwargs)
+
+    @staticmethod
+    def exec(**kwargs) -> None:
+        kwargs["cli"].scroll(1)

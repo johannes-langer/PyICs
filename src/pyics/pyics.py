@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 
-from pyics.actions import Demo, KeyAction, Quit
+from pyics.actions import Demo, KeyAction, Quit, ScrollDown, ScrollUp
 from pyics.cli import CLI
 from pyics.key_listener import hey_listen
 from pyics.task import Task
@@ -51,6 +51,8 @@ class PyIC:
         key_actions: list[KeyAction] = [
             Quit(cli=self.cli, pyics=self),
             Demo(cli=self.cli, pyics=self),
+            ScrollUp(cli=self.cli, pyics=self),
+            ScrollDown(cli=self.cli, pyics=self),
         ]
         for a in key_actions:
             self.key_actions[a.key] = a
