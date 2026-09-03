@@ -129,11 +129,6 @@ wheels = [
 ]
 
 [[package]]
-name = "fullsignatureprotocols"
-version = "0.0.1"
-source = { git = "https://github.com/johannes-langer/full-signature-protocols#45366e60ba9d33a6bf8cb9f5440b5c321b63cf2f" }
-
-[[package]]
 name = "iniconfig"
 version = "2.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -436,7 +431,6 @@ name = "pyics"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
-    { name = "fullsignatureprotocols" },
     { name = "ipykernel" },
     { name = "json-tricks" },
     { name = "jsonargparse" },
@@ -449,7 +443,6 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fullsignatureprotocols", git = "https://github.com/johannes-langer/full-signature-protocols" },
     { name = "ipykernel", specifier = ">=7.3.0" },
     { name = "json-tricks", specifier = ">=3.17.3" },
     { name = "jsonargparse", specifier = ">=4.48.0" },

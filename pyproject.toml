@@ -8,7 +8,6 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
-    "fullsignatureprotocols",
     "ipykernel>=7.3.0",
     "json-tricks>=3.17.3",
     "jsonargparse>=4.48.0",
@@ -26,6 +25,3 @@ create_task = "pyics.task:create_task"
 [build-system]
 requires = ["uv_build>=0.11.8,<0.12.0"]
 build-backend = "uv_build"
-
-[tool.uv.sources]
-fullsignatureprotocols = { git = "https://github.com/johannes-langer/full-signature-protocols" }

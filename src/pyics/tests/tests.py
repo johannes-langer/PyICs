@@ -6,11 +6,11 @@ from os import PathLike
 from types import ModuleType
 from typing import Any, Protocol
 
-from FullSignatureProtocols.FullSignatureProtocols import FullSignatureProtocol
 from _pytest.assertion.util import assertrepr_compare, dummy_highlighter
 
 import pyics.json_handling as json
 from pyics.tests.capture import capture_stdout
+from . import check_specs
 
 
 class Test(ABC):
@@ -132,7 +132,7 @@ class StructureTest(Test):
     def __init__(self, test_dict: dict): ...
 
 
-class ProtocolTest(Test):
+class SpecTest(Test):
     """symbols in file match some protocol"""
 
     symbol_name: str
