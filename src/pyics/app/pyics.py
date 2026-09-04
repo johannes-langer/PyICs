@@ -8,10 +8,10 @@ from typing import Any
 from rich.text import Text
 
 
-from pyics.actions import Demo, KeyAction, Quit, ScrollDown, ScrollUp
-from pyics.cli import CLI
-from pyics.key_listener import hey_listen
-from pyics.task import Task
+from pyics.app.actions import Demo, KeyAction, Quit, ScrollDown, ScrollUp
+from pyics.app.cli import CLI
+from pyics.app.key_listener import hey_listen
+from pyics.data.task import Task
 
 
 class PyIC:

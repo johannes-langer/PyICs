@@ -4,9 +4,9 @@ import sys
 
 import jsonargparse
 
-from pyics.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI
-from pyics.logging import setup_logging
-from pyics.pyics import PyIC
+from pyics.app.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI
+from pyics.util.logging import setup_logging
+from pyics.app.pyics import PyIC
 
 
 def main(*, log_level: str | int = 50, log_file: PathLike = Path("./.pyics.log")):

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from pyics.logging import get_logger
+from pyics.util.logging import get_logger
 
 
 class Action(ABC):

@@ -8,7 +8,7 @@ from typing import Any, Protocol
 
 from _pytest.assertion.util import assertrepr_compare, dummy_highlighter
 
-import pyics.json_handling as json
+import pyics.util.json_handling as json
 from pyics.tests.capture import capture_stdout
 from . import check_specs
 
@@ -136,13 +136,14 @@ class SpecTest(Test):
     """symbols in file match some protocol"""
 
     symbol_name: str
+    expected: check_specs.SpecType
 
     def __init__(
         self,
         name: str,
         file_path: PathLike,
         symbol_name: str,
-        expected,
+        expected: check_specs.SpecType,
         **kwargs,
     ):
         self.name = name
@@ -150,15 +151,12 @@ class SpecTest(Test):
         self.symbol_name = symbol_name
         self.expected = expected
 
-        if not self.expected._is_protocol or not self.expected._is_runtime_protocol:
-            raise TypeError("expected must be a Protocol.")
-
     def run(self) -> None:
         m = self.load_solution()
         symb = getattr(m, self.symbol_name)
 
-        if not isinstance(symb, self.expected):
-            raise AssertionError()
+        if diff := check_specs.compare_spec(self.expected, symb):
+            raise AssertionError("\n".join(diff))
 
 
 class SizeTest(Test):

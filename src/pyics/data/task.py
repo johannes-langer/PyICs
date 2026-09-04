@@ -13,8 +13,8 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
-import pyics.json_handling as json
-from pyics.logging import get_logger
+import pyics.util.json_handling as json
+from pyics.util.logging import get_logger
 from pyics.tests import Test
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin
 
@@ -325,6 +325,23 @@ class Task:
         )
 
         os.makedirs(fp.parent, exist_ok=True)
+
+        match fp.suffixes:
+            case []:
+                fp = fp.with_suffix(".pyicstask.json")
+            case [_]:
+                get_logger(__name__).warning(
+                    f"Replacing suffix '{fp.suffix}' with '.pyicstask.json'."
+                )
+                fp = fp.with_suffix(".pyicstask.json")
+            case [".pyicstask", ".json"]:
+                pass
+            case _:
+                get_logger(__name__).warning(
+                    f"File suffixes don't match expected file path. Adding '.pyicstask.json'."
+                )
+                fp = fp.with_suffix(fp.suffix + ".pyicstask.json")
+
         with open(fp, "w") as f:
             json.dump(task, f, indent=4)
 
