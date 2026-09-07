@@ -24,15 +24,16 @@ class Task:
 
     __status: RenderableType
     __info: RenderableType
+    __solved: bool = False
     __new_test_results: bool = False
 
-    def __init__(self, task_file: str | Path):
+    def __init__(self, task_file: PathLike):
         """
         Parses a task from a task json-file.
 
         Parameters
         ----------
-        task_file: str | Path
+        task_file: PathLike
             Path to the task file
         """
         self.__path = task_file
@@ -75,7 +76,7 @@ class Task:
         self.__new_test_results = False
 
     @property
-    def path(self) -> str | Path:
+    def path(self) -> PathLike:
         return self.__path
 
     @property
@@ -100,6 +101,8 @@ class Task:
         passed = [r.outcome == "passed" for r in relevant_reports]
         failed_reports = [r for r in relevant_reports if r.outcome == "failed"]
         pass_rate = round(100 * sum(passed) / len(passed)) if passed else 0
+
+        self.__solved = pass_rate == 100
 
         # result summary, box=None so the row reaches the panel's own border
         summary = Table(expand=True, show_header=False, box=None, padding=0)
@@ -160,6 +163,10 @@ class Task:
             sections.append(Padding(counts, pad=(1, 0, 0, 0)))
 
         self.__status = Group(*sections)
+
+    @property
+    def solved(self) -> bool:
+        return self.__solved
 
     def check_file_changes(self) -> bool:
         """

@@ -94,7 +94,7 @@ class SimpleTest(Test):
         file_path: PathLike,
         function_name: str,
         expected: Any,
-        /,
+        *,
         function_args: list[Any] = [],
         function_kwargs: dict[str, Any] = {},
         **kwargs,
@@ -127,7 +127,7 @@ class SimpleTest(Test):
 
 
 class StructureTest(Test):
-    """file contains some code-snippet"""
+    """Like SpecTest, but only targets typing, no symbol names."""
 
     def __init__(self, test_dict: dict): ...
 
