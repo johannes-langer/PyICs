@@ -141,7 +141,7 @@ class TextInput(Prompt):
 
     def hotkeys(self) -> dict[str, str]:
         if self.multiline:
-            return {"^D": "submit", "ctrl-c": "cancel"}
+            return {"ctrl-d": "submit", "ctrl-c": "cancel"}
         return {"enter": "submit", "ctrl-c": "cancel"}
 
     def handle_key(self, key: str) -> bool:
@@ -176,7 +176,9 @@ class TextInput(Prompt):
         return False
 
     def _insert(self, s: str) -> None:
-        self.buffer = self.buffer[: self.cursor_index] + s + self.buffer[self.cursor_index :]
+        self.buffer = (
+            self.buffer[: self.cursor_index] + s + self.buffer[self.cursor_index :]
+        )
         self.cursor_index += len(s)
 
     def result(self) -> str:
@@ -184,13 +186,29 @@ class TextInput(Prompt):
 
 
 class SelectInput(Prompt):
-    """Select one option from a fixed list, navigated with the up/down arrow keys."""
+    """Select one option from a fixed list, navigated with the up/down arrow keys.
 
-    def __init__(self, cli: CLI, label: str, options: list[str], *, initial_index: int = 0):
+    If ``option_hints`` is given (same order as ``options``), the hint for the currently
+    selected option is shown dimmed below it, separated from its neighbours by blank lines.
+    A falsy hint (``None``/``""``) shows nothing for that option.
+    """
+
+    def __init__(
+        self,
+        cli: CLI,
+        label: str,
+        options: list[str],
+        *,
+        initial_index: int = 0,
+        option_hints: list[str | None] | None = None,
+    ):
         if not options:
             raise ValueError("SelectInput requires at least one option")
+        if option_hints is not None and len(option_hints) != len(options):
+            raise ValueError("option_hints must have the same length as options")
         super().__init__(cli, label)
         self.options = options
+        self.option_hints = option_hints
         self.index = max(0, min(initial_index, len(options) - 1))
 
     def cursor_visible(self) -> bool:
@@ -205,6 +223,14 @@ class SelectInput(Prompt):
                 text.append(CURSOR_MARKER)
                 text.append("❯ ", style="bold blue")
                 text.append(option, style="reverse bold blue")
+                hint = self.option_hints[i] if self.option_hints else None
+                if hint:
+                    text.append("\n\n")
+                    text.append(
+                        "\n".join("  " + line for line in hint.splitlines()), style="dim"
+                    )
+                    if i < len(self.options) - 1:
+                        text.append("\n")
             else:
                 text.append("  ")
                 text.append(option)
@@ -244,8 +270,10 @@ def prompt_select(
     label: str,
     options: list[str],
     *,
+    option_hints: list[str | None] | None = None,
     q: queue.Queue[str] | None = None,
 ) -> str:
     """Block for the user to pick one of ``options`` (up/down + enter), rendered into
-    ``cli``'s main content panel, and return the chosen option."""
-    return SelectInput(cli, label, options).run(q)
+    ``cli``'s main content panel, and return the chosen option. ``option_hints``, if given,
+    are shown dimmed below the currently selected option."""
+    return SelectInput(cli, label, options, option_hints=option_hints).run(q)
