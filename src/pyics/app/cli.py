@@ -8,9 +8,10 @@ from typing import Any
 from pyfiglet import Figlet
 from rich import box
 from rich.align import Align
+from rich.cells import cell_len
 from rich.console import Console, Group, RenderableType
-from rich.panel import Panel
 from rich.padding import Padding
+from rich.panel import Panel
 from rich.progress import BarColumn, Progress, TextColumn
 from rich.segment import Segment
 from rich.table import Table
@@ -22,6 +23,12 @@ HIDE_CURSOR = "\033[?25l"
 SHOW_CURSOR = "\033[?25h"
 ALT_SCREEN_ENTER = "\033[?1049h"
 ALT_SCREEN_LEAVE = "\033[?1049l"
+
+# Private-use-area codepoint used by input widgets (see pyics.app.prompts) to mark where the
+# real terminal cursor should be positioned inside rendered main-content text. Zero display
+# width, never produced by a real keyboard/IME/paste buffer, stripped before the frame is
+# actually written to the terminal.
+CURSOR_MARKER = ""
 
 
 class CLI:
@@ -45,6 +52,11 @@ class CLI:
         # main-content viewport scroll state, in lines
         self.scroll_offset = 0
         self._max_scroll_offset = 0
+
+        # whether the real terminal cursor should be shown when a CURSOR_MARKER is present
+        # in the rendered main content (text-input widgets want it visible, select-list
+        # widgets rely on the marker only for viewport auto-follow, not a visible caret)
+        self.cursor_visible = True
 
         self.update_info("Ready")
         self.update_main_content(
@@ -202,6 +214,37 @@ class CLI:
         options = self.console.options.update(height=None)
         return self.console.render_lines(renderable, options, pad=False)
 
+    def _locate_and_strip_cursor(
+        self, lines: list[list[Segment]]
+    ) -> tuple[int, int] | None:
+        """
+        Find CURSOR_MARKER in rendered lines, strip it out (so it never actually prints),
+        and report where the real terminal cursor should go for it.
+
+        Scans against the *actual rendered* segments, rather than trying to predict where a
+        widget's marker lands from panel padding/border/word-wrap math, so this stays correct
+        regardless of box style, title, or wrapping.
+
+        Parameters
+        ----------
+        lines: list[list[Segment]]
+            Rendered lines to search, mutated in place to remove the marker.
+
+        Returns
+        -------
+        tuple[int, int] | None
+            ``(row, col)`` of the marker within ``lines`` (0-indexed), or ``None`` if absent.
+        """
+        for row, line in enumerate(lines):
+            for i, seg in enumerate(line):
+                idx = seg.text.find(CURSOR_MARKER)
+                if idx == -1:
+                    continue
+                col = cell_len("".join(s.text for s in line[:i])) + cell_len(seg.text[:idx])
+                line[i] = seg._replace(text=seg.text[:idx] + seg.text[idx + 1 :])
+                return row, col
+        return None
+
     def _lines_to_text(self, lines: list[list[Segment]]) -> str:
         """Join rendered lines back into a single ANSI-encoded string."""
         segments: list[Segment] = []
@@ -233,7 +276,15 @@ class CLI:
         viewport_height = max(0, term_height - len(header_lines) - len(footer_lines))
 
         main_lines = self._render_lines(main_panel)
+        cursor_pos = self._locate_and_strip_cursor(main_lines)
+
         self._max_scroll_offset = max(0, len(main_lines) - viewport_height)
+        if cursor_pos is not None:
+            row, _ = cursor_pos
+            if row < self.scroll_offset:
+                self.scroll_offset = row
+            elif row >= self.scroll_offset + viewport_height:
+                self.scroll_offset = row - viewport_height + 1
         self.scroll_offset = max(0, min(self.scroll_offset, self._max_scroll_offset))
         visible_main_lines = main_lines[
             self.scroll_offset : self.scroll_offset + viewport_height
@@ -245,6 +296,17 @@ class CLI:
         sys.stdout.write(self._lines_to_text(visible_main_lines))
         sys.stdout.write(f"\033[{term_height - len(footer_lines) + 1};1H")
         sys.stdout.write(self._lines_to_text(footer_lines))
+
+        if cursor_pos is not None and (
+            self.scroll_offset <= cursor_pos[0] < self.scroll_offset + viewport_height
+        ):
+            row, col = cursor_pos
+            abs_row = len(header_lines) + 1 + (row - self.scroll_offset)
+            sys.stdout.write(f"\033[{abs_row};{1 + col}H")
+            sys.stdout.write(SHOW_CURSOR if self.cursor_visible else HIDE_CURSOR)
+        else:
+            sys.stdout.write(HIDE_CURSOR)
+
         sys.stdout.flush()
         self._needs_redraw = False
 

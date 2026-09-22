@@ -5,7 +5,7 @@ import sys
 import termios
 import threading
 import tty
-from typing import Callable
+from collections.abc import Callable
 
 # Map recognized CSI (arrow-key) escape sequences to single-token key names. Terminals
 # also emit these for mouse-wheel scrolling while in the alt-screen buffer (xterm
@@ -13,8 +13,12 @@ from typing import Callable
 _CSI_KEYS = {
     "\x1b[A": "UP",
     "\x1b[B": "DOWN",
+    "\x1b[C": "RIGHT",
+    "\x1b[D": "LEFT",
     "\x1bOA": "UP",  # application cursor-key mode variants
     "\x1bOB": "DOWN",
+    "\x1bOC": "RIGHT",
+    "\x1bOD": "LEFT",
 }
 
 
@@ -22,6 +26,7 @@ class KeyListener(queue.Queue):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._raw_mode_ready = threading.Event()
+        self._stop_event = threading.Event()
 
     @staticmethod
     def _read_byte(fd: int) -> str:
@@ -80,17 +85,26 @@ class KeyListener(queue.Queue):
             self._raw_mode_ready.set()
 
         try:
-            while True:
+            while not self._stop_event.is_set():
+                if not select.select([fd], [], [], 0.05)[0]:
+                    continue
                 ch = self._read_byte(fd)
-                if ch == "\x03":  # ctrl-c
-                    self.put(ch)
-                    break
                 if ch == "\x1b":
                     self.put(self._read_escape_sequence(fd))
                     continue
                 self.put(ch)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    def stop(self) -> None:
+        """
+        Signal the reader thread to stop and block until it has actually exited (and cooked
+        terminal mode has been restored), so callers can rely on that being true the instant
+        this returns.
+        """
+        self._stop_event.set()
+        if hasattr(self, "thread"):
+            self.thread.join(timeout=1.0)
 
     def __enter__(self):
         self.thread = threading.Thread(target=self._key_listener, daemon=True)
@@ -99,7 +113,7 @@ class KeyListener(queue.Queue):
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        pass
+        self.stop()
 
     @staticmethod
     def hey_listen(q_param: str) -> Callable:
