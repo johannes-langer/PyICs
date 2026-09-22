@@ -357,14 +357,3 @@ class Task:
 
         with open(fp, "w") as f:
             json.dump(task, f, indent=4)
-
-
-def create_task():
-    print(
-        "The create_task script has not been set up yet. For now, use the create_task.ipynb notebook instead."
-    )
-    # jsonargparse.auto_cli(Task.create_task_json)
-
-
-if __name__ == "__main__":
-    create_task()

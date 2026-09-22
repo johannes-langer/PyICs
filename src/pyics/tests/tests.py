@@ -81,7 +81,17 @@ class PrintTest(Test):
 
 
 class SimpleTest(Test):
-    """output of a function must match the desired output for some parameters"""
+    """
+    Output of a function must match the desired output for some parameters.
+
+    TODO
+    ----
+    - can this test be easily created via cli? or does it need a file to be created?
+    - if creation happens via file, create the file from the cli as a template and
+      have the user fill in the blanks (i.e. function name, args, kwargs, and expected
+      return value)
+
+    """
 
     function_name: str
     function_args: list[Any]
@@ -133,7 +143,18 @@ class StructureTest(Test):
 
 
 class SpecTest(Test):
-    """symbols in file match some protocol"""
+    """
+    Symbols in file match some specification.
+
+    TODO
+    ----
+    - Overload constructor, allow either a SpecType or a dict
+    - if dict, should contain param-type str-str key-value pairs
+    - top level should have an is_class key with a boolean value to indicate whether the
+      dict represents a class (otherwise a function)
+    - allow for nested dicts
+    - these dicts allow for easier serialization for json storage
+    """
 
     symbol_name: str
     expected: check_specs.SpecType
