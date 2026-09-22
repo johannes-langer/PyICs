@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import collections
 from fractions import Fraction
 from os import PathLike
 import os

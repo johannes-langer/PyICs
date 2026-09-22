@@ -230,10 +230,16 @@ class Task:
                 except termios.error, ValueError:
                     tty_attrs = None
 
-                pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
-
-                if tty_attrs is not None:
-                    termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, tty_attrs)
+                try:
+                    pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
+                finally:
+                    if tty_attrs is not None:
+                        try:
+                            termios.tcsetattr(
+                                sys.stdin.fileno(), termios.TCSANOW, tty_attrs
+                            )
+                        except termios.error:
+                            pass
 
                 self.test_results = plugin.reports
 
