@@ -21,6 +21,7 @@ _CSI_KEYS = {
 class KeyListener(queue.Queue):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self._raw_mode_ready = threading.Event()
 
     @staticmethod
     def _read_byte(fd: int) -> str:
@@ -73,7 +74,12 @@ class KeyListener(queue.Queue):
             mode = termios.tcgetattr(fd)
             mode[1] |= termios.OPOST
             termios.tcsetattr(fd, termios.TCSADRAIN, mode)
+        finally:
+            # Unblock __enter__ only once raw mode is actually in effect (or setup
+            # failed), so nothing else can race the terminal into a stale mode.
+            self._raw_mode_ready.set()
 
+        try:
             while True:
                 ch = self._read_byte(fd)
                 if ch == "\x03":  # ctrl-c
@@ -89,6 +95,7 @@ class KeyListener(queue.Queue):
     def __enter__(self):
         self.thread = threading.Thread(target=self._key_listener, daemon=True)
         self.thread.start()
+        self._raw_mode_ready.wait()
         return self
 
     def __exit__(self, exc_type, exc, tb):

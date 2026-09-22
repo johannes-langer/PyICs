@@ -26,8 +26,6 @@ class PyIC:
         self.key_actions: dict[str, KeyAction] = {}
         self.__current_course: Course | None = None
 
-        self._find_course()
-
         self._register_actions()
         self.cli.update_hotkeys({a.ref: a.name for a in self.key_actions.values()})
 
@@ -85,6 +83,7 @@ class PyIC:
     def run(self, q: queue.Queue[str]):
         """ """
         self.cli()
+        self._find_course()
 
         while self.running:
             self.check_keypress(q)
