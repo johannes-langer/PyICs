@@ -8,35 +8,33 @@ from typing import Any
 from rich.text import Text
 
 
-from pyics.app.actions import Demo, KeyAction, Quit, ScrollDown, ScrollUp
+from pyics.app.actions import KeyAction, Quit, ScrollDown, ScrollUp
 from pyics.app.cli import CLI
 from pyics.app.key_listener import hey_listen
-from pyics.data.task import Task
+from pyics.data import Task, Course
 
 
 class PyIC:
     """PyIC main thread"""
 
-    __current_task: Task | None
+    __current_course: Course | None
 
     def __init__(self, cli: CLI):
         self.cwd = Path.cwd()
         self.cli = cli
         self.running = False
         self.key_actions: dict[str, KeyAction] = {}
-        self.__current_task: Task | None = None
-        self.tasks: list[Path] = []
-
-        self._find_tasks()
+        self.__current_course: Course | None = None
 
         self._register_actions()
         self.cli.update_hotkeys({a.ref: a.name for a in self.key_actions.values()})
 
-    def _find_tasks(self, max_depth: int = 2) -> None:
-        """TODO: This is indev behavior. Future application should have courses composed
-        of tasks. If anything, top-level should find courses (see Obsidian Notes).
+    def _find_course(self, max_depth: int = 2) -> None:
+        """TODO: This is indev behavior. In the future, there should be a course selector
+        if the application is not called with a specific course selected
 
-        Search the current working directory for task json files.
+        Search the current working directory for course json files (expecting only one)
+        and select it.
 
         Parameters
         ----------
@@ -45,14 +43,17 @@ class PyIC:
             value (2), this method would find ``./subdir/subsubdir/task.json``, but not
             ``./subdir/subsubdir/subsubsubdir/task.json``.
         """
-        globs = [self.cwd.glob(f"{'*/' * d}*.pyicstask.json") for d in range(max_depth + 1)]
-        self.tasks = sorted(itertools.chain(*globs))
+        globs = [
+            self.cwd.glob(f"{'*/' * d}*.pyicscourse.json") for d in range(max_depth + 1)
+        ]
+        self.__current_course = Course.load_course_manifest(
+            sorted(itertools.chain(*globs))[0]
+        )
 
     def _register_actions(self) -> None:
         """ """
         key_actions: list[KeyAction] = [
             Quit(cli=self.cli, pyics=self),
-            Demo(cli=self.cli, pyics=self),
             ScrollUp(cli=self.cli, pyics=self),
             ScrollDown(cli=self.cli, pyics=self),
         ]
@@ -66,40 +67,39 @@ class PyIC:
         self.thread.start()
 
     @property
-    def current_task(self) -> Task | None:
-        """
-        TODO: In the future, this should point to the current task of the active course.
-        Ensure this works dynamically.
-        """
-        return self.__current_task
+    def current_course(self) -> Course | None:
+        """"""
+        return self.__current_course
 
     def next_task(self) -> None:
         """
         Choose the next task in the self.tasks iteratable. Specifically load the task now
         to avoid populating memory with fully loaded tasks.
         """
-        if self.current_task is None:
-            self.__current_task = Task(self.tasks[0])
-        else:
-            self.__current_task = Task(
-                self.tasks[self.tasks.index(Path(self.current_task.path)) + 1]
-            )
+        if self.current_course is not None:
+            self.current_course.next()
 
     @hey_listen("q")
     def run(self, q: queue.Queue[str]):
         """ """
         self.cli()
+        self._find_course()
 
         while self.running:
             self.check_keypress(q)
-            if self.current_task is not None and self.current_task.check_file_changes():
-                self.current_task.run_tests()
-            if self.current_task is not None and self.current_task.new_test_results:
-                self.cli.update_main_content(
-                    self.current_task.status,
-                    Text(self.current_task.exercise_files[0].as_posix(), style="dim"),
-                )
-                self.current_task.clear_test_results()
+            if self.current_course is not None:
+                new_test_results, new_progress = self.current_course.tick()
+                if new_test_results:
+                    self.cli.update_main_content(
+                        self.current_course.current_task.status,
+                        Text(
+                            self.current_course.current_task.exercise_files[0].as_posix(),
+                            style="dim",
+                        ),
+                    )
+                    self.current_course.current_task.clear_test_results()
+                if new_progress:
+                    self.cli.update_progress(float(self.current_course.progress))
 
             time.sleep(0.05)
 

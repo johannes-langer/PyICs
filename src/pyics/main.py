@@ -23,7 +23,6 @@ def main(*, log_level: str | int = 50, log_file: PathLike = Path("./.pyics.log")
     sys.stdout.flush()
 
     cli = CLI()
-    cli.update_progress(0.3)
 
     pyics = PyIC(cli)
 

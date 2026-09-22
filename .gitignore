@@ -18,6 +18,7 @@ dev.ipynb
 .solutions/
 .tasks/
 .tests/
+.courses/
 
 # other
 .pyics.log
