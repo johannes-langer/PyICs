@@ -24,10 +24,8 @@ SHOW_CURSOR = "\033[?25h"
 ALT_SCREEN_ENTER = "\033[?1049h"
 ALT_SCREEN_LEAVE = "\033[?1049l"
 
-# Private-use-area codepoint used by input widgets (see pyics.app.prompts) to mark where the
-# real terminal cursor should be positioned inside rendered main-content text. Zero display
-# width, never produced by a real keyboard/IME/paste buffer, stripped before the frame is
-# actually written to the terminal.
+# Private-use codepoint that input widgets (see pyics.app.prompts) embed in the main content
+# to mark where the terminal cursor goes. Stripped before the frame is written.
 CURSOR_MARKER = ""
 
 
@@ -52,10 +50,11 @@ class CLI:
         # main-content viewport scroll state, in lines
         self.scroll_offset = 0
         self._max_scroll_offset = 0
+        # scroll a CURSOR_MARKER into view on the next draw; only set when the content
+        # changes, so manual scrolling isn't undone by the next redraw
+        self._follow_cursor = False
 
-        # whether the real terminal cursor should be shown when a CURSOR_MARKER is present
-        # in the rendered main content (text-input widgets want it visible, select-list
-        # widgets rely on the marker only for viewport auto-follow, not a visible caret)
+        # whether the terminal cursor is shown at a CURSOR_MARKER in the main content
         self.cursor_visible = True
 
         self.update_info("Ready")
@@ -140,6 +139,7 @@ class CLI:
         """
         self.main_content = Padding(renderable, (0 if title == "" else 1, 0, 0, 0))
         self.main_title = title
+        self._follow_cursor = True
         self._needs_redraw = True
 
     def add_to_main_content(self, renderable: RenderableType) -> None:
@@ -217,24 +217,8 @@ class CLI:
     def _locate_and_strip_cursor(
         self, lines: list[list[Segment]]
     ) -> tuple[int, int] | None:
-        """
-        Find CURSOR_MARKER in rendered lines, strip it out (so it never actually prints),
-        and report where the real terminal cursor should go for it.
-
-        Scans against the *actual rendered* segments, rather than trying to predict where a
-        widget's marker lands from panel padding/border/word-wrap math, so this stays correct
-        regardless of box style, title, or wrapping.
-
-        Parameters
-        ----------
-        lines: list[list[Segment]]
-            Rendered lines to search, mutated in place to remove the marker.
-
-        Returns
-        -------
-        tuple[int, int] | None
-            ``(row, col)`` of the marker within ``lines`` (0-indexed), or ``None`` if absent.
-        """
+        """Strip CURSOR_MARKER from the rendered ``lines`` (in place) and return its
+        0-indexed ``(row, col)``, or ``None`` if absent."""
         for row, line in enumerate(lines):
             for i, seg in enumerate(line):
                 idx = seg.text.find(CURSOR_MARKER)
@@ -259,6 +243,7 @@ class CLI:
         Draw the PyICs interface. Header and footer are pinned to the top/bottom of the
         terminal; only the main content scrolls, windowed to the space left between them.
         """
+        follow_cursor, self._follow_cursor = self._follow_cursor, False
         header_panel = self.generate_header()
         footer_panel = self.generate_footer()
 
@@ -279,10 +264,11 @@ class CLI:
         cursor_pos = self._locate_and_strip_cursor(main_lines)
 
         self._max_scroll_offset = max(0, len(main_lines) - viewport_height)
-        if cursor_pos is not None:
+        if cursor_pos is not None and follow_cursor:
             row, _ = cursor_pos
             if row < self.scroll_offset:
-                self.scroll_offset = row
+                # scroll all the way up if that shows the cursor, to keep the title visible
+                self.scroll_offset = 0 if row < viewport_height else row
             elif row >= self.scroll_offset + viewport_height:
                 self.scroll_offset = row - viewport_height + 1
         self.scroll_offset = max(0, min(self.scroll_offset, self._max_scroll_offset))

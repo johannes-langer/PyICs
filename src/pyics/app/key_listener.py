@@ -27,6 +27,7 @@ class KeyListener(queue.Queue):
         super().__init__(*args, **kwargs)
         self._raw_mode_ready = threading.Event()
         self._stop_event = threading.Event()
+        self.thread: threading.Thread | None = None
 
     @staticmethod
     def _read_byte(fd: int) -> str:
@@ -103,7 +104,7 @@ class KeyListener(queue.Queue):
         this returns.
         """
         self._stop_event.set()
-        if hasattr(self, "thread"):
+        if self.thread is not None:
             self.thread.join(timeout=1.0)
 
     def __enter__(self):

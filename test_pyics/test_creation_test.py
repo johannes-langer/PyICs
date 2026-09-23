@@ -12,7 +12,7 @@ from pyics.app.prompts import PromptCancelled, PromptSession
 from pyics.scripts.create_task import _prompt_test
 from pyics.tests.tests import SimpleTest
 
-DOWN, ENTER = "DOWN", "\r"
+DOWN, ENTER, BACKSPACE = "DOWN", "\r", "\x7f"
 
 INFO_FILE = """
 edges = [("A", "B", 4), ("B", "C", 5)]
@@ -50,7 +50,7 @@ def ex_files(tmp_path: Path) -> list[Path]:
     return [ex]
 
 
-def test_prefills_from_info_file(tmp_path: Path, ex_files: list[Path]) -> None:
+def test_symbols_from_info_file(tmp_path: Path, ex_files: list[Path]) -> None:
     info = tmp_path / "info.py"
     info.write_text(INFO_FILE)
     test = _run(
@@ -59,11 +59,9 @@ def test_prefills_from_info_file(tmp_path: Path, ex_files: list[Path]) -> None:
             *_type(str(info)),
             # name, function_name: exact matches
             ENTER,  # file_path: the only exercise file
-            ENTER,  # expected: select a symbol...
-            DOWN, DOWN, ENTER,  # ...exp (of edges, all_edges, exp, args)
-            ENTER,  # function_args: select a symbol...
-            DOWN, DOWN, ENTER,  # ...args (exp is taken)
-            DOWN, DOWN, ENTER,  # function_kwargs: leave empty
+            *_type("exp"),  # expected
+            BACKSPACE, BACKSPACE, *_type("args[1:]"),  # function_args, prefilled with []
+            ENTER,  # function_kwargs: keep {}
         ],
         ex_files,
     )  # fmt: skip
@@ -71,30 +69,24 @@ def test_prefills_from_info_file(tmp_path: Path, ex_files: list[Path]) -> None:
     assert test.function_name == "depth_first_search"
     assert test.file_path == ex_files[0].absolute()
     assert test.expected == ("A", "B", "C")
-    assert test.function_args[1:] == ["A", "C"]
+    assert test.function_args == ["A", "C"]
     assert test.function_kwargs == {}
 
 
-def test_file_path_prefilled_if_exercise_file(
-    tmp_path: Path, ex_files: list[Path]
-) -> None:
-    info = tmp_path / "info.py"
-    info.write_text(
-        f"name = 'n'\nfunction_name = 'f'\nexpected = 1\nfile_path = {str(ex_files[0])!r}"
-    )
+def test_invalid_expression_is_asked_again(ex_files: list[Path]) -> None:
     test = _run(
         [
-            ENTER,
-            *_type(str(info)),
-            DOWN, ENTER,  # function_args: enter value
-            ENTER,  # prefilled with []
-            DOWN, ENTER,  # function_kwargs: leave empty
+            DOWN, ENTER,  # reference a file: no
+            *_type("t"),  # name
+            ENTER,  # file_path
+            *_type("f"),  # function_name
+            *_type("1 +"),  # expected: syntax error...
+            *_type(" 1"),  # ...fixed, keeping the rejected input
+            ENTER, ENTER,  # function_args, function_kwargs: keep defaults
         ],
         ex_files,
     )  # fmt: skip
-    assert test.file_path == ex_files[0].absolute()
-    assert test.expected == 1
-    assert test.function_args == []
+    assert test.expected == 2
 
 
 def test_unusable_match_is_prompted_for(tmp_path: Path, ex_files: list[Path]) -> None:
@@ -104,10 +96,9 @@ def test_unusable_match_is_prompted_for(tmp_path: Path, ex_files: list[Path]) ->
         [
             ENTER,
             *_type(str(info)),
-            *_type("n"),  # name isn't a str, and there are no other symbols to pick
+            *_type("n"),  # name isn't a str
             ENTER,  # file_path
-            DOWN, ENTER,  # function_args: leave empty
-            DOWN, ENTER,  # function_kwargs: leave empty
+            ENTER, ENTER,  # function_args, function_kwargs: keep defaults
         ],
         ex_files,
     )  # fmt: skip
@@ -121,9 +112,8 @@ def test_without_info_file(ex_files: list[Path]) -> None:
             *_type("t"),  # name
             ENTER,  # file_path
             *_type("f"),  # function_name
-            *_type("1"),  # expected: required, so entered directly
-            ENTER, ENTER,  # function_args: enter value, prefilled with []
-            DOWN, ENTER,  # function_kwargs: leave empty
+            *_type("1"),  # expected
+            ENTER, ENTER,  # function_args, function_kwargs: keep defaults
         ],
         ex_files,
     )  # fmt: skip
