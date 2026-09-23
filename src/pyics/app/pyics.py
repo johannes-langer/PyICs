@@ -49,6 +49,7 @@ class PyIC:
         self.__current_course = Course.load_course_manifest(
             sorted(itertools.chain(*globs))[0]
         )
+        self.cli.update_info(self.__current_course.current_task.instructions)
 
     def _register_actions(self) -> None:
         """ """

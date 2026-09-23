@@ -52,7 +52,7 @@ def _tag_tuples(obj):
 
 
 def _untag_tuples(dct):
-    if isinstance(dct, dict) and "__tuple__" in dct:
+    if isinstance(dct, dict):
         if "__tuple__" in dct:
             return tuple(dct["__tuple__"])
         if "__pyics_set__" in dct:
