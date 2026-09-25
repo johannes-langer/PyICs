@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from rich.console import RenderableType
+
 from pyics.data.task import Task
 from pyics.util import json_handling as json
 from pyics.util.logging import get_logger
@@ -32,14 +34,50 @@ class Course:
         self.__current_task: Task = Task(
             self.tasks[self.__tasks_list[int(self.__progress.index(0))]]
         )
+        self.__task_changed: bool = True
 
     @property
     def progress(self) -> Fraction:
         return Fraction(sum(self.__progress), len(self.__progress))
 
     @property
-    def current_task(self) -> Task:
-        return self.__current_task
+    def instructions(self) -> str:
+        return self.__current_task.instructions
+
+    @property
+    def info(self) -> RenderableType:
+        """
+        The current task's info, i.e. what is supposed to be displayed in the pyics header.
+        """
+        return self.__current_task.info
+
+    # @info.setter
+    # def info(self, v: str) -> None:
+    #     """
+    #     I don't think this is needed.
+    #     """
+    #     self.__current_task.info = v
+
+    @property
+    def status(self) -> RenderableType:
+        """
+        The current task's status, i.e. what is supposed to be displayed in the pyics
+        main panel.
+        """
+        return self.__current_task.status
+
+    def update_status(self) -> None:
+        """
+        Expose the current task's update_status() method.
+        """
+        self.__current_task.update_status()
+
+    @property
+    def exercise_files(self) -> list[Path]:
+        """
+        The current task's exercise file paths.
+        """
+        return self.__current_task.exercise_files
 
     def next(self) -> Task:
         """
@@ -50,17 +88,18 @@ class Course:
         Task
             Next task if the current task is solved, otherwise current task.
         """
-        if self.current_task.solved:
+        if self.__current_task.solved:
             current_task_number = self.__tasks_list.index(
-                {v: k for k, v in self.tasks.items()}.get(self.current_task.path)  # pyright: ignore[reportArgumentType]
+                {v: k for k, v in self.tasks.items()}.get(self.__current_task.path)  # pyright: ignore[reportArgumentType]
             )
 
-            if current_task_number >= len(self.__tasks_list):
+            if current_task_number + 1 < len(self.__tasks_list):
                 self.__current_task = Task(
                     self.tasks[self.__tasks_list[current_task_number + 1]]
                 )
+                self.__task_changed = True
 
-        return self.current_task
+        return self.__current_task
 
     def previous(self) -> Task:
         """
@@ -74,15 +113,31 @@ class Course:
         """
         # get course-specific name of current task
         current_task_number = self.__tasks_list.index(
-            {v: k for k, v in self.tasks.items()}.get(self.current_task.path)  # pyright: ignore[reportArgumentType]
+            {v: k for k, v in self.tasks.items()}.get(self.__current_task.path)  # pyright: ignore[reportArgumentType]
         )
 
         if current_task_number != 0:
             self.__current_task = Task(
                 self.tasks[self.__tasks_list[current_task_number - 1]]
             )
+            self.__task_changed = True
 
-        return self.current_task
+        return self.__current_task
+
+    @property
+    def task_changed(self) -> bool:
+        """
+        Flag to indicate whether the current task has changed, set by next or previous.
+        """
+        return self.__task_changed
+
+    def clear_task_changed(self) -> None:
+        """Expose the option to reset task_changed"""
+        self.__task_changed = False
+
+    def clear_test_results(self) -> None:
+        """Expose the current task's clear_test_results method"""
+        self.__current_task.clear_test_results()
 
     def tick(self) -> tuple[bool, bool]:
         """
@@ -101,22 +156,22 @@ class Course:
             second position indicates whether the course progress has been updated (i.e.
             whether a task has been newly solved/unsolved)
         """
-        files_changed = self.current_task.check_file_changes()
+        files_changed = self.__current_task.check_file_changes()
 
         if files_changed:
-            self.current_task.run_tests()
+            self.__current_task.run_tests()
 
         current_task_number = self.__tasks_list.index(
-            {v: k for k, v in self.tasks.items()}.get(self.current_task.path)  # pyright: ignore[reportArgumentType]
+            {v: k for k, v in self.tasks.items()}.get(self.__current_task.path)  # pyright: ignore[reportArgumentType]
         )
-        if self.current_task.solved:
+        if self.__current_task.solved:
             new_progress = not self.__progress[current_task_number] == 1
             self.__progress[current_task_number] = 1
         else:
             new_progress = self.__progress[current_task_number] == 1
             self.__progress[current_task_number] = 0
 
-        return (self.current_task.new_test_results, new_progress)
+        return (self.__current_task.new_test_results, new_progress)
 
     @classmethod
     def load_course_manifest(cls, fp: PathLike) -> Course:
