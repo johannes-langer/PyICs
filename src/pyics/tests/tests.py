@@ -1,8 +1,10 @@
+import copy
 import importlib.util as iutil
 import sys
 from abc import ABC, abstractmethod
 from importlib.machinery import ModuleSpec
 from os import PathLike
+from pathlib import Path
 from types import ModuleType
 from typing import Any, Protocol
 
@@ -40,7 +42,11 @@ class Test(ABC):
 
         module = iutil.module_from_spec(spec)
         sys.modules["current_solution"] = module
-        spec.loader.exec_module(module)
+        # compiled from source rather than run by the loader, whose cached bytecode is
+        # stale if the file was saved twice within a second without changing its size
+        source = Path(self.file_path).read_bytes()
+        code = compile(source, self.file_path, "exec", dont_inherit=True)
+        exec(code, module.__dict__)  # noqa: S102
 
         return module
 
@@ -111,7 +117,11 @@ class SimpleTest(Test):
     def run(self) -> None:
         m = self.load_solution()
         func = getattr(m, self.function_name)
-        res = func(*self.function_args, **self.function_kwargs)
+        # copied, so a solution that modifies its arguments can't change them for the
+        # next run of this test
+        res = func(
+            *copy.deepcopy(self.function_args), **copy.deepcopy(self.function_kwargs)
+        )
 
         if res != self.expected:
             expl = list(

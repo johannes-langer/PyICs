@@ -2,6 +2,7 @@
 Test whether the automatic tests work.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,10 @@ def path(start, goal):
 
 def fail():
     raise ValueError("boom")
+
+def append_four(xs):
+    xs.append(4)
+    return xs
 """
 
 EDGES = [("A", "B"), ("A", "C"), ("B", "C")]
@@ -102,6 +107,34 @@ def test_solution_is_reloaded_on_every_run(solution: Path) -> None:
     solution.write_text(SOLUTION.replace("a + b", "a + b + 1"))
     with pytest.raises(AssertionError, match=r"^4 == 3$"):
         test.run()
+
+
+def test_edit_keeping_size_and_second_is_picked_up(solution: Path) -> None:
+    """E.g. a typo fixed and saved right after the previous save."""
+    mtime = solution.stat().st_mtime
+    test = SimpleTest("t", solution, "add", 3, function_args=[1, 2])
+    test.run()
+
+    solution.write_text(SOLUTION.replace("a + b", "a * b"))
+    os.utime(solution, (mtime, mtime))
+    with pytest.raises(AssertionError, match=r"^2 == 3$"):
+        test.run()
+
+
+@pytest.mark.parametrize("by_keyword", [False, True])
+def test_solution_cannot_change_the_arguments(solution: Path, by_keyword: bool) -> None:
+    xs = [1, 2, 3]
+    test = SimpleTest(
+        "t",
+        solution,
+        "append_four",
+        [1, 2, 3, 4],
+        function_args=[] if by_keyword else [xs],
+        function_kwargs={"xs": xs} if by_keyword else {},
+    )
+    test.run()
+    test.run()  # e.g. after the exercise file is saved again
+    assert xs == [1, 2, 3]
 
 
 def test_from_dict(solution: Path) -> None:
