@@ -11,7 +11,7 @@ from typing import Any, Protocol
 from _pytest.assertion.util import assertrepr_compare, dummy_highlighter
 
 import pyics.util.json_handling as json
-from pyics.tests.capture import capture_stdout
+from pyics.tests.capture import capture_stdout, provide_input
 from . import check_specs
 
 
@@ -75,20 +75,34 @@ class PrintTest(Test):
     Console output of a file must match the desired output.
 
     The file is run as a script (with ``__name__ == "__main__"``) until it ends or exits,
-    e.g. by calling ``sys.exit()``. Whitespace that isn't visible in a console is
-    ignored. Only the output of the thread running the test is captured, so that other
-    threads (e.g. the CLI's) can keep writing to the console in the meantime.
+    e.g. by calling ``sys.exit()``. Its ``input()`` calls are answered with ``inputs``,
+    in order, which show up in the output like answers typed into a console. Whitespace
+    that isn't visible in a console is ignored. Only the output of the thread running the
+    test is captured, so that other threads (e.g. the CLI's) can keep writing to the
+    console in the meantime.
     """
 
     expected: str  # printout is necessarily str
+    inputs: list[str]
 
-    def __init__(self, name: str, file_path: PathLike, expected: str, **kwargs):
+    def __init__(
+        self,
+        name: str,
+        file_path: PathLike,
+        expected: str,
+        *,
+        inputs: list[str] = [],
+        **kwargs,
+    ):
+        if isinstance(inputs, str):
+            raise TypeError("inputs must be a list, with an answer per input() call")
         self.name = name
         self.file_path = file_path
         self.expected = expected
+        self.inputs = [str(answer) for answer in inputs]
 
     def run(self) -> None:
-        with capture_stdout() as buffer:
+        with capture_stdout() as buffer, provide_input(self.inputs):
             try:
                 self.load_solution(as_main=True)
             except SystemExit:

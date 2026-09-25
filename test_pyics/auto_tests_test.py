@@ -259,6 +259,35 @@ def test_print_errors_in_the_file_propagate(tmp_path: Path) -> None:
         PrintTest("t", _script(tmp_path, code), "Hello").run()
 
 
+INTERACTIVE_SCRIPT = """
+name = input("Name: ")
+age = int(input("Age: "))
+print(f"{name} is {age}.")
+"""
+
+
+def test_print_inputs_answer_input_calls_in_order(tmp_path: Path) -> None:
+    # the answers are shown after their prompts, as if typed into the console
+    expected = "Name: Bob\nAge: 42\nBob is 42."
+    test = PrintTest(
+        "t", _script(tmp_path, INTERACTIVE_SCRIPT), expected, inputs=["Bob", "42"]
+    )
+    test.run()
+
+
+@pytest.mark.parametrize("inputs", [[], ["Bob"]])
+def test_print_running_out_of_inputs_fails(tmp_path: Path, inputs: list[str]) -> None:
+    """Rather than waiting for input from the console."""
+    test = PrintTest("t", _script(tmp_path, INTERACTIVE_SCRIPT), "", inputs=inputs)
+    with pytest.raises(EOFError):
+        test.run()
+
+
+def test_print_inputs_must_be_a_list(script: Path) -> None:
+    with pytest.raises(TypeError, match="list"):
+        PrintTest("t", script, "", inputs="Bob")
+
+
 def test_print_captures_only_its_own_thread(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -284,8 +313,13 @@ print("Bye")
     assert capsys.readouterr().out == "drawn meanwhile\n"
 
 
-def test_print_json_round_trip(script: Path) -> None:
-    test = PrintTest("t", script, "Hello, World!\nBye\n")
+def test_print_json_round_trip(tmp_path: Path) -> None:
+    test = PrintTest(
+        "t",
+        _script(tmp_path, INTERACTIVE_SCRIPT),
+        "Name: Bob\nAge: 42\nBob is 42.",
+        inputs=["Bob", "42"],
+    )
     loaded = json.loads(test.serialize())
     assert isinstance(loaded, PrintTest)
     assert vars(loaded) == vars(test)
