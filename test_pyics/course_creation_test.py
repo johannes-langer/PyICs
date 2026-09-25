@@ -180,7 +180,7 @@ def test_new_task_is_not_written(
             "I", "\x04",  # instructions
             *_type(str(ex)), DOWN, ENTER,  # one exercise file
             *_type(str(sol)), DOWN, ENTER,  # one solution file
-            DOWN, DOWN, ENTER,  # no tests
+            DOWN, DOWN, DOWN, ENTER,  # no tests
             ENTER,  # task file path: keep the default
             DOWN, ENTER,  # done, no reordering for a single task
         ],

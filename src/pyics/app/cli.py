@@ -244,6 +244,9 @@ class CLI:
         Draw the PyICs interface. Header and footer are pinned to the top/bottom of the
         terminal; only the main content scrolls, windowed to the space left between them.
         """
+        # cleared before anything is read, so changes made while this frame is drawn
+        # (e.g. from other threads) are drawn by the next one
+        self._needs_redraw = False
         follow_cursor, self._follow_cursor = self._follow_cursor, False
         header_panel = self.generate_header()
         footer_panel = self.generate_footer()
@@ -295,7 +298,6 @@ class CLI:
             sys.stdout.write(HIDE_CURSOR)
 
         sys.stdout.flush()
-        self._needs_redraw = False
 
     def run(self):
         """
