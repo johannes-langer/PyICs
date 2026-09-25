@@ -19,8 +19,7 @@ PyICs is a framework for interactive Python tutorials, inspired by the _rustling
 - [ ] Implement Test-Framework. Do these tests:
   - [ ] ``PrintTest``: Printout of File needs to be correct
   - [ ] ``SimpleTest``: Output of ``func`` needs to match for some inputs
-  - [ ] ``StructureTest``: File contains some code-snippet (as naming invariant as possible)
-  - [ ] ``ProtocolTest``: Symbols in file match some protocol
+  - [ ] ``SpecTest``: Symbols in file match some specification (``by_type=True`` for a naming invariant check)
 - [ ] Save Tasks as json files. When simply launching pyics, it should check the working directory for a ``.tasks`` directory, assuming that task json files are stored there.
 - [ ] Pick some library for high-quality error messages
 - [ ] Track Progress (simply store a json file). Only prompt for a username on first launch or reset.

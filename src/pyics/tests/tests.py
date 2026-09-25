@@ -83,14 +83,6 @@ class PrintTest(Test):
 class SimpleTest(Test):
     """
     Output of a function must match the desired output for some parameters.
-
-    TODO
-    ----
-    - can this test be easily created via cli? or does it need a file to be created?
-    - if creation happens via file, create the file from the cli as a template and
-      have the user fill in the blanks (i.e. function name, args, kwargs, and expected
-      return value)
-
     """
 
     function_name: str
@@ -136,28 +128,19 @@ class SimpleTest(Test):
             raise AssertionError("\n".join(expl))
 
 
-class StructureTest(Test):
-    """Like SpecTest, but only targets typing, no symbol names."""
-
-    def __init__(self, test_dict: dict): ...
-
-
 class SpecTest(Test):
     """
     Symbols in file match some specification.
 
-    TODO
-    ----
-    - Overload constructor, allow either a SpecType or a dict
-    - if dict, should contain param-type str-str key-value pairs
-    - top level should have an is_class key with a boolean value to indicate whether the
-      dict represents a class (otherwise a function)
-    - allow for nested dicts
-    - these dicts allow for easier serialization for json storage
+    ``expected`` is either a spec dict (see ``check_specs``), or a class or function,
+    which is converted into a spec dict so that the test can be stored as json. If
+    ``by_type`` is set, parameters and attributes are matched by their type only, ignoring
+    their names and order.
     """
 
     symbol_name: str
-    expected: check_specs.SpecType
+    expected: check_specs.SpecDict
+    by_type: bool
 
     def __init__(
         self,
@@ -165,18 +148,21 @@ class SpecTest(Test):
         file_path: PathLike,
         symbol_name: str,
         expected: check_specs.SpecType,
+        *,
+        by_type: bool = False,
         **kwargs,
     ):
         self.name = name
         self.file_path = file_path
         self.symbol_name = symbol_name
-        self.expected = expected
+        self.expected = check_specs.to_spec_dict(expected)
+        self.by_type = by_type
 
     def run(self) -> None:
         m = self.load_solution()
         symb = getattr(m, self.symbol_name)
 
-        if diff := check_specs.compare_spec(self.expected, symb):
+        if diff := check_specs.compare_spec(self.expected, symb, by_type=self.by_type):
             raise AssertionError("\n".join(diff))
 
 

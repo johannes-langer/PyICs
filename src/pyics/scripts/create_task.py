@@ -24,14 +24,14 @@ from pyics.app.prompts import (
 )
 from pyics.data.task import Task
 from pyics.tests import Test
-from pyics.tests.tests import SimpleTest
+from pyics.tests.tests import SimpleTest, SpecTest
 
 _TOTAL_STEPS = 5
 _INFO = "Creating a new task..."
 
 # Test types the CLI can create. Their constructor parameters are prompted for by
 # ``_prompt_test``, and the first line of their docstring is shown as a hint.
-_TEST_TYPES: list[type[Test]] = [SimpleTest]
+_TEST_TYPES: list[type[Test]] = [SimpleTest, SpecTest]
 _NO_MORE_TESTS = "Done"
 
 
@@ -181,8 +181,6 @@ def _task_flow(s: PromptSession) -> dict[str, Any]:
     sol_files = _prompt_files(s, "solution")
 
     s.cli.update_progress(4 / _TOTAL_STEPS)
-    # TODO: PrintTest, StructureTest, SpecTest and SizeTest can't be created from the
-    # CLI yet (see _TEST_TYPES).
     tests = _prompt_tests(s, ex_files)
 
     s.cli.update_progress(5 / _TOTAL_STEPS)
