@@ -284,7 +284,7 @@ class Task:
         ex_files: Union[PathLike, list[PathLike], None] = None,
         sol_files: Union[PathLike, list[PathLike], None] = None,
         tests: Union[Test, list[Test], None] = None,
-    ):
+    ) -> Path:
         """TODO
         Create a task_json from all relevant information as it would naturally be available
         when designing a task.
@@ -303,6 +303,12 @@ class Task:
             Filename or list of filenames of solution files.
         tests: Union[Test, list[Test]]
             Filename or list of filenames containing serialized tests
+
+        Returns
+        -------
+        Path
+            The path the task file was written to, with its suffix normalized to
+            '.pyicstask.json'.
         """
         fp = Path(fp)
         task: dict = {}
@@ -357,3 +363,5 @@ class Task:
 
         with open(fp, "w") as f:
             json.dump(task, f, indent=4)
+
+        return fp

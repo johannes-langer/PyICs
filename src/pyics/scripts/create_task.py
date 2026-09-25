@@ -2,6 +2,7 @@ import builtins
 import inspect
 import reprlib
 import sys
+from collections.abc import Collection
 from os import PathLike
 from pathlib import Path
 from types import ModuleType
@@ -158,10 +159,22 @@ def _prompt_tests(s: PromptSession, ex_files: list[Path]) -> list[Test]:
         tests.append(_prompt_test(s, test_types[kind], ex_files))
 
 
-def _task_flow(s: PromptSession) -> dict[str, Any]:
+def _check_name(name: str, taken_names: Collection[str]) -> str:
+    """Return ``name`` if it can be used for a task (or course), raise otherwise."""
+    if not name:
+        raise ValueError("the name may not be empty")
+    if name in taken_names:
+        raise ValueError(f"the course already has a task named {name!r}")
+    return name
+
+
+def _task_flow(
+    s: PromptSession, *, taken_names: Collection[str] = ()
+) -> dict[str, Any]:
     """
     The full task-creation flow. Replayed by ``PromptSession`` whenever the user goes
-    back, so it must ask the same prompts given the same answers.
+    back, so it must ask the same prompts given the same answers. The task name may not
+    be one of ``taken_names``.
 
     Returns
     -------
@@ -169,7 +182,7 @@ def _task_flow(s: PromptSession) -> dict[str, Any]:
         Keyword arguments for ``Task.create_task_json``.
     """
     s.cli.update_progress(0 / _TOTAL_STEPS)
-    name = s.ask(TextInput("Task name"))
+    name = s.ask(TextInput("Task name"), lambda n: _check_name(n, taken_names))
 
     s.cli.update_progress(1 / _TOTAL_STEPS)
     instructions = s.ask(TextInput("Instructions", multiline=True))
@@ -215,7 +228,7 @@ def _create_task(fp: PathLike | None = None) -> None:
 
         if not fp:
             fp = Path(f"./{fields['name']}")
-        Task.create_task_json(fp, **fields)
+        fp = Task.create_task_json(fp, **fields)
         cli.update_info(f"Task written to {fp}")
     except PromptCancelled:
         cli.update_info("Cancelled, no task was created.")

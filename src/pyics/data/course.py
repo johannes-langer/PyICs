@@ -145,7 +145,7 @@ class Course:
         *,
         name: Optional[str] = None,
         use_task_names: bool = True,
-    ) -> None:
+    ) -> Path:
         """
         Compose a course manifest from the provided ``task_files``. A course manifest is
         a json file containing the course name, current progress, and an ordered mapping
@@ -164,6 +164,12 @@ class Course:
             Use tasks' names for the mapping in the course manifest. Default is True.
             Setting this to False increases performance (no more json loading of tasks),
             but loses information (only enumerates tasks).
+
+        Returns
+        -------
+        Path
+            The path the manifest was written to, with its suffix normalized to
+            '.pyicscourse.json'.
         """
         fp = Path(fp)
 
@@ -209,3 +215,5 @@ class Course:
         os.makedirs(fp.parent, exist_ok=True)
         with open(fp, "w") as f:
             json.dump(manifest, f, indent=4)
+
+        return fp

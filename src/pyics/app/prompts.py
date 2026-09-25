@@ -292,6 +292,75 @@ class SelectInput(Prompt):
         return key in _SUBMIT_KEYS
 
 
+class ReorderInput(Prompt):
+    """Reorder ``options`` with the arrow keys: space picks up the selected option, up/down
+    then move it, and space drops it again. Answers are the new order, as comma-separated
+    indices into ``options``; ``parse`` returns the reordered options."""
+
+    show_cursor = False
+    scroll_with_arrows = False  # up/down move the selection, which the viewport follows
+
+    def __init__(
+        self, label: str, options: list[str], *, details: RenderableType | None = None
+    ) -> None:
+        if not options:
+            raise ValueError("ReorderInput requires at least one option")
+        super().__init__(label, details=details)
+        self.hotkeys = {
+            "↑/↓": "select/move",
+            "space": "pick up/drop",
+            "enter": "confirm",
+        }
+        self.options = options
+        self.order = list(range(len(options)))
+        self.index = 0
+        self.grabbed = False
+
+    def _indices(self, answer: str) -> list[int]:
+        order = [int(i) for i in answer.split(",")]
+        if sorted(order) != list(range(len(self.options))):
+            raise ValueError(f"{answer!r} is not an order of the options")
+        return order
+
+    def answer(self) -> str:
+        return ",".join(map(str, self.order))
+
+    def set_answer(self, answer: str) -> None:
+        try:
+            self.order = self._indices(answer)
+        except ValueError:
+            pass
+
+    def parse(self, answer: str) -> list[str]:
+        return [self.options[i] for i in self._indices(answer)]
+
+    def render_body(self) -> RenderableType:
+        text = Text()
+        for i, option in enumerate(self.options[j] for j in self.order):
+            if i:
+                text.append("\n")
+            if i != self.index:
+                text.append("  " + option)
+            elif self.grabbed:
+                text.append(CURSOR_MARKER + "↕ ", style="bold yellow")
+                text.append(option, style="reverse bold yellow")
+            else:
+                text.append(CURSOR_MARKER + "❯ ", style="bold blue")
+                text.append(option, style="reverse bold blue")
+        return text
+
+    def handle_key(self, key: str) -> bool:
+        if key in ("UP", "DOWN"):
+            i = self.index
+            j = max(0, min(len(self.options) - 1, i + (1 if key == "DOWN" else -1)))
+            if self.grabbed:
+                self.order[i], self.order[j] = self.order[j], self.order[i]
+            self.index = j
+        elif key == " ":
+            self.grabbed = not self.grabbed
+        return key in _SUBMIT_KEYS
+
+
 class PromptSession:
     """
     Runs a multi-prompt flow that the user can step back through, one prompt at a time.
