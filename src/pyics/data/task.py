@@ -254,11 +254,20 @@ class Task:
         finally:
             self._tests_lock.release()
 
-    def create_files(self, exercise_code: list[str], solution_code: list[str]) -> None:
+    def create_files(
+        self,
+        exercise_code: list[str],
+        solution_code: list[str],
+        *,
+        overwrite: bool = False,
+    ) -> None:
         """
         Create the exercise and solution files. Assumes that filepaths in
         self.exercise_files and self.solution_files are in the same order as the code
         lists, respectively.
+
+        Existing exercise files are kept (they hold the student's work) unless
+        ``overwrite`` is set. Solution files are always rewritten.
 
         Parameters
         ----------
@@ -266,9 +275,13 @@ class Task:
             List of file-contents for the exercise files
         solution_code: list[str]
             List of file-contents for the solution files
+        overwrite: bool (optional, keyword only)
+            Reset existing exercise files to the exercise code. Default is False.
         """
 
         for fp, code in zip(self.exercise_files, exercise_code):
+            if not overwrite and fp.exists():
+                continue
             with open(fp, "w") as f:
                 f.write(code)
 
@@ -284,7 +297,7 @@ class Task:
         ex_files: Union[PathLike, list[PathLike], None] = None,
         sol_files: Union[PathLike, list[PathLike], None] = None,
         tests: Union[Test, list[Test], None] = None,
-    ):
+    ) -> Path:
         """TODO
         Create a task_json from all relevant information as it would naturally be available
         when designing a task.
@@ -303,6 +316,12 @@ class Task:
             Filename or list of filenames of solution files.
         tests: Union[Test, list[Test]]
             Filename or list of filenames containing serialized tests
+
+        Returns
+        -------
+        Path
+            The path the task file was written to, with its suffix normalized to
+            '.pyicstask.json'.
         """
         fp = Path(fp)
         task: dict = {}
@@ -358,13 +377,4 @@ class Task:
         with open(fp, "w") as f:
             json.dump(task, f, indent=4)
 
-
-def create_task():
-    print(
-        "The create_task script has not been set up yet. For now, use the create_task.ipynb notebook instead."
-    )
-    # jsonargparse.auto_cli(Task.create_task_json)
-
-
-if __name__ == "__main__":
-    create_task()
+        return fp

@@ -6,6 +6,7 @@ dist/
 wheels/
 *.egg-info
 .pytest_cache/
+.ruff_cache/
 
 # Virtual environments
 .venv
@@ -22,3 +23,5 @@ dev.ipynb
 
 # other
 .pyics.log
+dfs_simple_test.py
+bfs_simple_test.py

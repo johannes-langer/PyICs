@@ -81,7 +81,9 @@ class PrintTest(Test):
 
 
 class SimpleTest(Test):
-    """output of a function must match the desired output for some parameters"""
+    """
+    Output of a function must match the desired output for some parameters.
+    """
 
     function_name: str
     function_args: list[Any]
@@ -126,17 +128,19 @@ class SimpleTest(Test):
             raise AssertionError("\n".join(expl))
 
 
-class StructureTest(Test):
-    """Like SpecTest, but only targets typing, no symbol names."""
-
-    def __init__(self, test_dict: dict): ...
-
-
 class SpecTest(Test):
-    """symbols in file match some protocol"""
+    """
+    Symbols in file match some specification.
+
+    ``expected`` is either a spec dict (see ``check_specs``), or a class or function,
+    which is converted into a spec dict so that the test can be stored as json. If
+    ``by_type`` is set, parameters and attributes are matched by their type only, ignoring
+    their names and order.
+    """
 
     symbol_name: str
-    expected: check_specs.SpecType
+    expected: check_specs.SpecDict
+    by_type: bool
 
     def __init__(
         self,
@@ -144,18 +148,21 @@ class SpecTest(Test):
         file_path: PathLike,
         symbol_name: str,
         expected: check_specs.SpecType,
+        *,
+        by_type: bool = False,
         **kwargs,
     ):
         self.name = name
         self.file_path = file_path
         self.symbol_name = symbol_name
-        self.expected = expected
+        self.expected = check_specs.to_spec_dict(expected)
+        self.by_type = by_type
 
     def run(self) -> None:
         m = self.load_solution()
         symb = getattr(m, self.symbol_name)
 
-        if diff := check_specs.compare_spec(self.expected, symb):
+        if diff := check_specs.compare_spec(self.expected, symb, by_type=self.by_type):
             raise AssertionError("\n".join(diff))
 
 

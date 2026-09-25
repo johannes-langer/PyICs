@@ -8,9 +8,10 @@ from typing import Any
 from pyfiglet import Figlet
 from rich import box
 from rich.align import Align
+from rich.cells import cell_len
 from rich.console import Console, Group, RenderableType
-from rich.panel import Panel
 from rich.padding import Padding
+from rich.panel import Panel
 from rich.progress import BarColumn, Progress, TextColumn
 from rich.segment import Segment
 from rich.table import Table
@@ -22,6 +23,10 @@ HIDE_CURSOR = "\033[?25l"
 SHOW_CURSOR = "\033[?25h"
 ALT_SCREEN_ENTER = "\033[?1049h"
 ALT_SCREEN_LEAVE = "\033[?1049l"
+
+# Private-use codepoint that input widgets (see pyics.app.prompts) embed in the main content
+# to mark where the terminal cursor goes. Stripped before the frame is written.
+CURSOR_MARKER = ""
 
 
 class CLI:
@@ -45,6 +50,12 @@ class CLI:
         # main-content viewport scroll state, in lines
         self.scroll_offset = 0
         self._max_scroll_offset = 0
+        # scroll a CURSOR_MARKER into view on the next draw; only set when the content
+        # changes, so manual scrolling isn't undone by the next redraw
+        self._follow_cursor = False
+
+        # whether the terminal cursor is shown at a CURSOR_MARKER in the main content
+        self.cursor_visible = True
 
         self.update_info("Ready")
         self.update_main_content(
@@ -85,7 +96,7 @@ class CLI:
         table.add_column(vertical="middle", ratio=1)
         table.add_row(
             Text(figlet_text, style="blue", no_wrap=True),
-            Text(self.info_text, style="white"),
+            Text.from_markup(self.info_text, style="white", emoji=False),
         )
 
         return Panel(
@@ -128,6 +139,7 @@ class CLI:
         """
         self.main_content = Padding(renderable, (0 if title == "" else 1, 0, 0, 0))
         self.main_title = title
+        self._follow_cursor = True
         self._needs_redraw = True
 
     def add_to_main_content(self, renderable: RenderableType) -> None:
@@ -178,7 +190,8 @@ class CLI:
         Parameters
         ----------
         text: str
-            The new info-text to draw. Supports ``rich`` markup.
+            The new info-text to draw. Supports ``rich`` markup, so plain text that may
+            contain square brackets must be escaped (``rich.markup.escape``).
         """
         self.info_text = text
         self._needs_redraw = True
@@ -202,6 +215,21 @@ class CLI:
         options = self.console.options.update(height=None)
         return self.console.render_lines(renderable, options, pad=False)
 
+    def _locate_and_strip_cursor(
+        self, lines: list[list[Segment]]
+    ) -> tuple[int, int] | None:
+        """Strip CURSOR_MARKER from the rendered ``lines`` (in place) and return its
+        0-indexed ``(row, col)``, or ``None`` if absent."""
+        for row, line in enumerate(lines):
+            for i, seg in enumerate(line):
+                idx = seg.text.find(CURSOR_MARKER)
+                if idx == -1:
+                    continue
+                col = cell_len("".join(s.text for s in line[:i])) + cell_len(seg.text[:idx])
+                line[i] = seg._replace(text=seg.text[:idx] + seg.text[idx + 1 :])
+                return row, col
+        return None
+
     def _lines_to_text(self, lines: list[list[Segment]]) -> str:
         """Join rendered lines back into a single ANSI-encoded string."""
         segments: list[Segment] = []
@@ -216,6 +244,7 @@ class CLI:
         Draw the PyICs interface. Header and footer are pinned to the top/bottom of the
         terminal; only the main content scrolls, windowed to the space left between them.
         """
+        follow_cursor, self._follow_cursor = self._follow_cursor, False
         header_panel = self.generate_header()
         footer_panel = self.generate_footer()
 
@@ -233,7 +262,16 @@ class CLI:
         viewport_height = max(0, term_height - len(header_lines) - len(footer_lines))
 
         main_lines = self._render_lines(main_panel)
+        cursor_pos = self._locate_and_strip_cursor(main_lines)
+
         self._max_scroll_offset = max(0, len(main_lines) - viewport_height)
+        if cursor_pos is not None and follow_cursor:
+            row, _ = cursor_pos
+            if row < self.scroll_offset:
+                # scroll all the way up if that shows the cursor, to keep the title visible
+                self.scroll_offset = 0 if row < viewport_height else row
+            elif row >= self.scroll_offset + viewport_height:
+                self.scroll_offset = row - viewport_height + 1
         self.scroll_offset = max(0, min(self.scroll_offset, self._max_scroll_offset))
         visible_main_lines = main_lines[
             self.scroll_offset : self.scroll_offset + viewport_height
@@ -245,6 +283,17 @@ class CLI:
         sys.stdout.write(self._lines_to_text(visible_main_lines))
         sys.stdout.write(f"\033[{term_height - len(footer_lines) + 1};1H")
         sys.stdout.write(self._lines_to_text(footer_lines))
+
+        if cursor_pos is not None and (
+            self.scroll_offset <= cursor_pos[0] < self.scroll_offset + viewport_height
+        ):
+            row, col = cursor_pos
+            abs_row = len(header_lines) + 1 + (row - self.scroll_offset)
+            sys.stdout.write(f"\033[{abs_row};{1 + col}H")
+            sys.stdout.write(SHOW_CURSOR if self.cursor_visible else HIDE_CURSOR)
+        else:
+            sys.stdout.write(HIDE_CURSOR)
+
         sys.stdout.flush()
         self._needs_redraw = False
 

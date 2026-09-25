@@ -5,10 +5,11 @@ import threading
 import time
 from typing import Any
 
+from rich.markup import escape
 from rich.text import Text
 
 
-from pyics.app.actions import KeyAction, Quit, ScrollDown, ScrollUp
+from pyics.app.actions import KeyAction, Next, Previous, Quit, ScrollDown, ScrollUp
 from pyics.app.cli import CLI
 from pyics.app.key_listener import hey_listen
 from pyics.data import Task, Course
@@ -54,6 +55,8 @@ class PyIC:
         """ """
         key_actions: list[KeyAction] = [
             Quit(cli=self.cli, pyics=self),
+            Next(pyics=self),
+            Previous(pyics=self),
             ScrollUp(cli=self.cli, pyics=self),
             ScrollDown(cli=self.cli, pyics=self),
         ]
@@ -89,15 +92,23 @@ class PyIC:
             self.check_keypress(q)
             if self.current_course is not None:
                 new_test_results, new_progress = self.current_course.tick()
-                if new_test_results:
+                task_changed = self.current_course.task_changed
+                if task_changed:
+                    self.current_course.clear_task_changed()
+                    self.cli.update_info(escape(self.current_course.instructions))
+                if new_test_results or task_changed:
+                    # clear before reading the status, so results that arrive in between
+                    # are picked up on the next tick instead of being dropped
+                    self.current_course.clear_test_results()
                     self.cli.update_main_content(
-                        self.current_course.current_task.status,
+                        self.current_course.status,
                         Text(
-                            self.current_course.current_task.exercise_files[0].as_posix(),
+                            ", ".join(
+                                p.as_posix() for p in self.current_course.exercise_files
+                            ),
                             style="dim",
                         ),
                     )
-                    self.current_course.current_task.clear_test_results()
                 if new_progress:
                     self.cli.update_progress(float(self.current_course.progress))
 
