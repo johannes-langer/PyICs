@@ -21,7 +21,7 @@ import pytest
 from pyics.app.cli import CLI
 from pyics.app.pyics import PyIC
 from pyics.data import Course, Task
-from pyics.tests.tests import SimpleTest
+from pyics.tests.tests import PrintTest, SimpleTest, Test
 
 # a crash in one of the interface's threads fails the test, instead of only warning
 pytestmark = pytest.mark.filterwarnings(
@@ -34,12 +34,13 @@ TIMEOUT = 10  # seconds
 
 ADD_TEMPLATE = "def add(a, b):\n    return 0\n"
 ADD_SOLUTION = "def add(a, b):\n    return a + b\n"
-GREET_TEMPLATE = 'def greet(name):\n    return ""\n'
-GREET_SOLUTION = 'def greet(name):\n    return f"Hello, {name}!"\n'
+GREET_MAIN = '\nif __name__ == "__main__":\n    print(greet("World"))\n'
+GREET_TEMPLATE = 'def greet(name):\n    return ""\n' + GREET_MAIN
+GREET_SOLUTION = 'def greet(name):\n    return f"Hello, {name}!"\n' + GREET_MAIN
 
 
 def _task(
-    ex: Path, instructions: str, template: str, solution: str, *tests: SimpleTest
+    ex: Path, instructions: str, template: str, solution: str, *tests: Test
 ) -> Path:
     """Write a task file like ``create_task`` does, named after the exercise file."""
     sol = ex.with_name(f"{ex.stem}_solution.py")
@@ -72,6 +73,7 @@ def exercises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Pa
             SimpleTest(
                 "greets", greet, "greet", "Hello, World!", function_args=["World"]
             ),
+            PrintTest("prints a greeting", greet, "Hello, World!"),
         ),
     ]
     Course.create_course_manifest(tmp_path / "course", task_files)
@@ -286,3 +288,21 @@ def test_syntax_errors_fail_the_tests(app: App, exercises: tuple[Path, Path]) ->
 
     _save(add, ADD_SOLUTION)
     app.wait_for(lambda: "2 passed" in app.screen)
+
+
+def test_solving_all_tasks(
+    app: App, exercises: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    add, greet = exercises
+    _save(add, ADD_SOLUTION)
+    app.wait_for(lambda: "2 passed" in app.screen)
+    app.press("n")
+    app.wait_for(
+        lambda: "prints a greeting failed: '' == 'Hello, World!'" in app.screen
+    )
+
+    _save(greet, GREET_SOLUTION)
+    app.wait_for(lambda: "2 passed" in app.screen)
+    app.wait_for(lambda: app.cli.percentage == 1)
+    # the output of the print test isn't written over the interface
+    assert "Hello, World!" not in capsys.readouterr().out
