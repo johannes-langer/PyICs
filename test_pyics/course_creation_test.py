@@ -170,6 +170,8 @@ def test_new_task_is_not_written(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     ex, sol = tmp_path / "ex.py", tmp_path / "sol.py"
+    ex.touch()
+    sol.touch()
     fields = _run(
         [
             *_type("Course"),
@@ -196,7 +198,7 @@ def test_new_task_is_not_written(
             },
         )
     ]
-    assert list(tmp_path.iterdir()) == []
+    assert list(tmp_path.glob("*.pyicstask.json")) == []
 
 
 def test_check_path(tmp_path: Path) -> None:

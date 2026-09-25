@@ -96,7 +96,7 @@ class CLI:
         table.add_column(vertical="middle", ratio=1)
         table.add_row(
             Text(figlet_text, style="blue", no_wrap=True),
-            Text(self.info_text, style="white"),
+            Text.from_markup(self.info_text, style="white", emoji=False),
         )
 
         return Panel(
@@ -190,7 +190,8 @@ class CLI:
         Parameters
         ----------
         text: str
-            The new info-text to draw. Supports ``rich`` markup.
+            The new info-text to draw. Supports ``rich`` markup, so plain text that may
+            contain square brackets must be escaped (``rich.markup.escape``).
         """
         self.info_text = text
         self._needs_redraw = True

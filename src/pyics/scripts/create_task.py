@@ -10,6 +10,7 @@ from typing import Any
 
 import jsonargparse
 from rich.console import Group
+from rich.markup import escape
 from rich.text import Text
 
 import pyics.util.json_handling as json
@@ -24,7 +25,7 @@ from pyics.app.prompts import (
     TextInput,
 )
 from pyics.data.task import Task
-from pyics.tests import Test
+from pyics.tests import Test, check_specs
 from pyics.tests.tests import SimpleTest, SpecTest
 
 _TOTAL_STEPS = 5
@@ -40,21 +41,31 @@ def _confirm(s: PromptSession, label: str) -> bool:
     return s.ask(SelectInput(label, ["yes", "no"])) == "yes"
 
 
+def _check_file(raw: str) -> Path:
+    """Return ``raw`` as a path (with ``~`` expanded) if it is an existing file, raise
+    otherwise."""
+    path = Path(raw).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"no file at {raw!r}")
+    return path
+
+
 def _prompt_files(s: PromptSession, kind: str) -> list[Path]:
-    """Interactively collect a list of ``kind`` (e.g. "exercise") file paths, one at a
-    time."""
+    """Interactively collect a list of existing ``kind`` (e.g. "exercise") file paths,
+    one at a time."""
     files: list[Path] = []
     while True:
-        files.append(Path(s.ask(PathInput(f"{kind.capitalize()} file path"))))
+        files.append(s.ask(PathInput(f"{kind.capitalize()} file path"), _check_file))
         if not _confirm(s, f"Add another {kind} file?"):
             return files
 
 
-def _load_namespace(path: str) -> dict[str, Any]:
-    """Execute the Python file at ``path`` and return the variables it defines (excluding
+def _load_namespace(raw: str) -> dict[str, Any]:
+    """Execute the Python file at ``raw`` and return the variables it defines (excluding
     dunders and modules)."""
+    path = _check_file(raw)
     namespace: dict[str, Any] = {}
-    exec(compile(Path(path).read_text(), path, "exec"), namespace)  # noqa: S102
+    exec(compile(path.read_text(), str(path), "exec"), namespace)  # noqa: S102
     return {
         k: v
         for k, v in namespace.items()
@@ -62,9 +73,13 @@ def _load_namespace(path: str) -> dict[str, Any]:
     }
 
 
-def _check(param: inspect.Parameter, value: Any) -> Any:
-    """Return ``value`` if it can be used for the test constructor parameter ``param``,
-    raise otherwise."""
+def _check(test_cls: type[Test], param: inspect.Parameter, value: Any) -> Any:
+    """Return ``value`` if it can be used for the ``test_cls`` constructor parameter
+    ``param``, raise otherwise."""
+    if test_cls is SpecTest and param.name == "expected":
+        # e.g. the solution's function itself, stored as its spec dict. Also validates
+        # spec dicts now, rather than when the test is constructed.
+        value = check_specs.to_spec_dict(value)
     if param.annotation is str and not isinstance(value, str):
         raise TypeError(f"expected str, got {type(value).__name__}")
     # checked now, rather than when the task file is written after all other fields
@@ -73,12 +88,17 @@ def _check(param: inspect.Parameter, value: Any) -> Any:
 
 
 def _prompt_param(
-    s: PromptSession, param: inspect.Parameter, symbols: dict[str, Any], problem: str
+    s: PromptSession,
+    test_cls: type[Test],
+    param: inspect.Parameter,
+    symbols: dict[str, Any],
+    problem: str,
 ) -> Any:
     """
-    Ask for the value of ``param``, prefilled with its default: plain text for ``str``
-    parameters, otherwise a Python expression, evaluated with ``symbols`` in scope.
-    ``problem``, if not empty, is shown below the input.
+    Ask for the value of the ``test_cls`` constructor parameter ``param``, prefilled with
+    its default: plain text for ``str`` parameters, otherwise a Python expression,
+    evaluated with ``symbols`` in scope. ``problem``, if not empty, is shown below the
+    input.
     """
     lines = [Text(problem, style="red")] if problem else []
     has_default = param.default is not param.empty
@@ -99,7 +119,7 @@ def _prompt_param(
         details=Group(*lines) if lines else None,
     )
     scope = {"__builtins__": builtins, **symbols}
-    return s.ask(prompt, lambda raw: _check(param, eval(raw, dict(scope))))
+    return s.ask(prompt, lambda raw: _check(test_cls, param, eval(raw, dict(scope))))
 
 
 def _prompt_test(s: PromptSession, test_cls: type[Test], ex_files: list[Path]) -> Test:
@@ -128,11 +148,11 @@ def _prompt_test(s: PromptSession, test_cls: type[Test], ex_files: list[Path]) -
         problem = ""
         if param.name in symbols:
             try:
-                kwargs[param.name] = _check(param, symbols[param.name])
+                kwargs[param.name] = _check(test_cls, param, symbols[param.name])
                 continue
-            except TypeError as err:
+            except (TypeError, ValueError) as err:
                 problem = f"'{param.name}' from the test information file: {err}"
-        kwargs[param.name] = _prompt_param(s, param, symbols, problem)
+        kwargs[param.name] = _prompt_param(s, test_cls, param, symbols, problem)
 
     return test_cls(**kwargs)
 
@@ -229,7 +249,7 @@ def _create_task(fp: PathLike | None = None) -> None:
         if not fp:
             fp = Path(f"./{fields['name']}")
         fp = Task.create_task_json(fp, **fields)
-        cli.update_info(f"Task written to {fp}")
+        cli.update_info(f"Task written to {escape(str(fp))}")
     except PromptCancelled:
         cli.update_info("Cancelled, no task was created.")
     finally:

@@ -5,10 +5,11 @@ import threading
 import time
 from typing import Any
 
+from rich.markup import escape
 from rich.text import Text
 
 
-from pyics.app.actions import KeyAction, Quit, ScrollDown, ScrollUp
+from pyics.app.actions import KeyAction, Next, Previous, Quit, ScrollDown, ScrollUp
 from pyics.app.cli import CLI
 from pyics.app.key_listener import hey_listen
 from pyics.data import Task, Course
@@ -49,12 +50,14 @@ class PyIC:
         self.__current_course = Course.load_course_manifest(
             sorted(itertools.chain(*globs))[0]
         )
-        self.cli.update_info(self.__current_course.current_task.instructions)
+        self.cli.update_info(escape(self.__current_course.current_task.instructions))
 
     def _register_actions(self) -> None:
         """ """
         key_actions: list[KeyAction] = [
             Quit(cli=self.cli, pyics=self),
+            Next(pyics=self),
+            Previous(pyics=self),
             ScrollUp(cli=self.cli, pyics=self),
             ScrollDown(cli=self.cli, pyics=self),
         ]

@@ -83,29 +83,6 @@ class Quit(KeyAction):
         pyics.running = False
 
 
-# class Demo(KeyAction):
-#     """
-#     Perform a demo action
-#     """
-
-#     def __init__(self, name: str = "Demo", key: str = "d", **kwargs):
-#         """
-#         Parameters
-#         ----------
-#         cli: CLI (kwarg)
-#             CLI object
-#         """
-#         super().__init__(name, key, **kwargs)
-
-#     @staticmethod
-#     def exec(**kwargs) -> None:
-#         cli = kwargs["cli"]
-#         pyics = kwargs["pyics"]
-#         pyics.next_task()
-#         cli.update_main_content(pyics.current_task.status)
-#         cli.update_info(pyics.current_task.info)
-
-
 class Next(KeyAction):
     """Move to the next task."""
 
@@ -114,8 +91,7 @@ class Next(KeyAction):
 
     @staticmethod
     def exec(**kwargs) -> None:
-        """TODO"""
-        ...
+        kwargs["pyics"].current_course.next()
 
 
 class Previous(KeyAction):
@@ -126,8 +102,7 @@ class Previous(KeyAction):
 
     @staticmethod
     def exec(**kwargs) -> None:
-        """TODO"""
-        ...
+        kwargs["pyics"].current_course.previous()
 
 
 class ResetTask(KeyAction):

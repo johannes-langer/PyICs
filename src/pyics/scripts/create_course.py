@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import jsonargparse
+from rich.markup import escape
 
 import pyics.util.json_handling as json
 from pyics.app.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI, SHOW_CURSOR
@@ -214,7 +215,7 @@ def _create_course(fp: PathLike | None = None, max_depth: int = 3) -> None:
         fp = Course.create_course_manifest(
             fp or Path(f"./{fields['name']}"), task_files, name=fields["name"]
         )
-        cli.update_info(f"Course written to {fp}")
+        cli.update_info(f"Course written to {escape(str(fp))}")
     except PromptCancelled:
         cli.update_info("Cancelled, no course was created.")
     finally:
