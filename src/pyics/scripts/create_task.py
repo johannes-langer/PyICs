@@ -55,6 +55,12 @@ def _prompt_files(s: PromptSession, kind: str) -> list[Path]:
     """Interactively collect a list of existing ``kind`` (e.g. "exercise") file paths,
     one at a time."""
     files: list[Path] = []
+
+    if kind == "solution":
+        # we do not need a solution file necessarily.
+        if not _confirm(s, f"Add a {kind} file?"):
+            return files
+
     while True:
         files.append(s.ask(PathInput(f"{kind.capitalize()} file path"), _check_file))
         if not _confirm(s, f"Add another {kind} file?"):

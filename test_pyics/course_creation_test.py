@@ -180,7 +180,7 @@ def test_new_task_is_not_written(
             *_type("Task"),
             "I", "\x04",  # instructions
             *_type(str(ex)), DOWN, ENTER,  # one exercise file
-            *_type(str(sol)), DOWN, ENTER,  # one solution file
+            ENTER, *_type(str(sol)), DOWN, ENTER,  # add a solution file: yes, just one
             *[DOWN] * len(_TEST_TYPES), ENTER,  # no tests
             ENTER,  # task file path: keep the default
             DOWN, ENTER,  # done, no reordering for a single task
