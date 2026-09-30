@@ -153,7 +153,8 @@ def test_unusable_match_is_prompted_for(tmp_path: Path, ex_files: list[Path]) ->
         [
             ENTER,
             *_type(str(info)),
-            *_type("n"),  # name isn't a str
+            # name isn't a str: enter text instead of picking the str 'function_name'
+            DOWN, ENTER, *_type("n"),
             ENTER,  # file_path
             ENTER, ENTER,  # function_args, function_kwargs: keep defaults
         ],

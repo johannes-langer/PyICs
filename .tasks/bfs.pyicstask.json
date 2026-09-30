@@ -1,0 +1,217 @@
+{
+    "name": "Breadth-First Search",
+    "instructions": "Implement breadth-first search using a non-recursive queue-based approach.",
+    "ex_files": [
+        {
+            "__pathlib__": "../.exercises/bfs.py"
+        }
+    ],
+    "sol_files": [
+        {
+            "__pathlib__": "../.solutions/bfs.py"
+        }
+    ],
+    "exercise_code": [
+        "# TODO: implement the breadth-first-search algorithm using a non-recursive queue-based approach\n\nimport operator\n\n\ndef neighbors(graph: list[tuple[str, str, int]], node: str) -> list[str]:\n    \"\"\"Return the successors of a node.\"\"\"\n    return sorted(map(operator.itemgetter(1), filter(lambda x: x[0] == node, graph)))\n\n\ndef breadth_first_search(\n    graph: list[tuple[str, str, int]], start: str, goal: str\n) -> list[str] | None:\n    \"\"\"Return a path from start to goal using depth-first search.\"\"\"\n    ...\n"
+    ],
+    "solution_code": [
+        "import operator\n\n\ndef neighbors(graph: list[tuple[str, str, int]], node: str) -> list[str]:\n    \"\"\"Return the successors of a node.\"\"\"\n    return sorted(map(operator.itemgetter(1), filter(lambda x: x[0] == node, graph)))\n\n\ndef breadth_first_search(\n    graph: list[tuple[str, str, int]], start: str, goal: str\n) -> tuple[str, ...] | None:\n    \"\"\"Return a path from start to goal using depth-first search.\"\"\"\n    queue = []\n    queue.append((start,))\n    print(queue, \"\\n\")\n    while queue:\n        path = queue.pop(0)\n        node = path[-1]\n        print(\"Terminal node\", node)\n        if node == goal:\n            return path\n        print(f\"Neighbors of {node}:\", neighbors(graph, node))\n        for neighbor in neighbors(graph, node):\n            if neighbor in path:\n                continue\n            queue.append(path + (neighbor,))\n        print(\"Current queue:\", queue, \"\\n\")\n    return None\n"
+    ],
+    "tests": [
+        {
+            "__instance_type__": [
+                "pyics.tests.tests",
+                "SimpleTest"
+            ],
+            "slots": {},
+            "attributes": {
+                "name": "Search path test",
+                "file_path": {
+                    "__pathlib__": "../.exercises/bfs.py"
+                },
+                "function_name": "breadth_first_search",
+                "expected": {
+                    "__tuple__": [
+                        "A",
+                        "E",
+                        "G"
+                    ]
+                },
+                "function_args": [
+                    [
+                        {
+                            "__tuple__": [
+                                "A",
+                                "B",
+                                4
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "A",
+                                "E",
+                                10
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "B",
+                                "C",
+                                5
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "B",
+                                "D",
+                                2
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "B",
+                                "E",
+                                6
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "D",
+                                "E",
+                                1
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "D",
+                                "F",
+                                3
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "E",
+                                "F",
+                                6
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "E",
+                                "G",
+                                1
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "B",
+                                "A",
+                                4
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "E",
+                                "A",
+                                10
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "C",
+                                "B",
+                                5
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "D",
+                                "B",
+                                2
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "E",
+                                "B",
+                                6
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "E",
+                                "D",
+                                1
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "F",
+                                "D",
+                                3
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "F",
+                                "E",
+                                6
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "G",
+                                "E",
+                                1
+                            ]
+                        }
+                    ],
+                    "A",
+                    "G"
+                ],
+                "function_kwargs": {}
+            }
+        },
+        {
+            "__instance_type__": [
+                "pyics.tests.tests",
+                "SpecTest"
+            ],
+            "slots": {},
+            "attributes": {
+                "name": "Signature Check",
+                "file_path": {
+                    "__pathlib__": "../.exercises/bfs.py"
+                },
+                "symbol_name": "breadth_first_search",
+                "expected": {
+                    "is_class": false,
+                    "graph": "list[tuple[str, str, int]]",
+                    "start": "str",
+                    "goal": "str",
+                    "return": "tuple[str, ...] | None"
+                },
+                "by_type": false
+            }
+        },
+        {
+            "__instance_type__": [
+                "pyics.tests.tests",
+                "StructureTest"
+            ],
+            "slots": {},
+            "attributes": {
+                "name": "No-Recursion Check",
+                "file_path": {
+                    "__pathlib__": "../.exercises/bfs.py"
+                },
+                "rules": [
+                    {
+                        "concept": "recursion",
+                        "max": 0
+                    }
+                ]
+            }
+        }
+    ]
+}

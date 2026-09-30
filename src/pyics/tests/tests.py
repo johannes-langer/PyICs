@@ -191,7 +191,7 @@ class StructureTest(Test):
     def run(self) -> None:
         path = Path(self.file_path)
         diff = check_structure.check_structure(
-            self.rules, path.read_text(), filename=path.name
+            self.rules, path.read_text(encoding="utf-8"), filename=path.name
         )
         if diff:
             raise AssertionError("\n".join(diff))

@@ -21,7 +21,6 @@ _OPAQUE_TYPES = (
     datetime,
     timedelta,
     Enum,
-    Path,
     complex,
 )
 
@@ -36,6 +35,10 @@ def _tag_tuples(obj):
         except TypeError:
             items = list(obj)
         return {kind: [_tag_tuples(v) for v in items]}
+    if isinstance(obj, Path):
+        # json_tricks would store str(obj), i.e. backslashes on Windows. Forward slashes
+        # are read correctly on all platforms.
+        return {"__pathlib__": obj.as_posix()}
     if isinstance(obj, list):
         return [_tag_tuples(v) for v in obj]
     if isinstance(obj, dict):

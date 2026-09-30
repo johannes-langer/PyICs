@@ -1,3 +1,4 @@
+import copy
 import os
 from os import PathLike
 from pathlib import Path
@@ -14,6 +15,7 @@ from rich.table import Table
 from rich.text import Text
 
 import pyics.util.json_handling as json
+from pyics.util import paths
 from pyics.util.logging import get_logger
 from pyics.tests import Test
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin
@@ -31,25 +33,36 @@ class Task:
         """
         Parses a task from a task json-file.
 
+        File paths in the task file are relative to the task file's directory (see
+        ``create_task_json``).
+
         Parameters
         ----------
         task_file: PathLike
             Path to the task file
         """
         self.__path = task_file
-        with open(task_file, "r") as f:
+        with open(task_file, "r", encoding="utf-8") as f:
             raw_json: dict = json.load(f)
+
+        base = Path(task_file).parent
 
         self.name: str = raw_json.get("name", "Task")
         self.instructions: str = raw_json.get("instructions", "")
 
-        self.exercise_files: list[Path] = [Path(fp) for fp in raw_json.get("ex_files", [])]
-        self.solution_files: list[Path] = [Path(fp) for fp in raw_json.get("sol_files", [])]
+        self.exercise_files: list[Path] = [
+            paths.resolve(fp, base) for fp in raw_json.get("ex_files", [])
+        ]
+        self.solution_files: list[Path] = [
+            paths.resolve(fp, base) for fp in raw_json.get("sol_files", [])
+        ]
 
         # The solution and exercise code does not need to be in memory
         self.create_files(raw_json["exercise_code"], raw_json["solution_code"])
 
         self.tests: list[Test] = raw_json["tests"]
+        for test in self.tests:
+            test.file_path = paths.resolve(test.file_path, base)
 
         self.last_mtimes = {
             f: os.path.getmtime(f) for f in self.exercise_files if os.path.exists(f)
@@ -267,7 +280,8 @@ class Task:
         lists, respectively.
 
         Existing exercise files are kept (they hold the student's work) unless
-        ``overwrite`` is set. Solution files are always rewritten.
+        ``overwrite`` is set. Solution files are always rewritten. Missing parent
+        directories are created.
 
         Parameters
         ----------
@@ -282,12 +296,12 @@ class Task:
         for fp, code in zip(self.exercise_files, exercise_code):
             if not overwrite and fp.exists():
                 continue
-            with open(fp, "w") as f:
-                f.write(code)
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(code, encoding="utf-8")
 
         for fp, code in zip(self.solution_files, solution_code):
-            with open(fp, "w") as f:
-                f.write(code)
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(code, encoding="utf-8")
 
     @staticmethod
     def create_task_json(
@@ -301,6 +315,11 @@ class Task:
         """TODO
         Create a task_json from all relevant information as it would naturally be available
         when designing a task.
+
+        File paths (``ex_files``, ``sol_files`` and the tests' ``file_path``) are given
+        relative to the working directory (or absolute), and stored relative to the
+        directory of the task file, so the task keeps working when it is moved together
+        with its files.
 
         Parameters
         ----------
@@ -324,39 +343,41 @@ class Task:
             '.pyicstask.json'.
         """
         fp = Path(fp)
+        base = fp.parent
         task: dict = {}
 
         task["name"] = name
         task["instructions"] = instructions
 
-        task["ex_files"] = (
+        ex_files = (
             ex_files
             if isinstance(ex_files, list)
             else [ex_files]
             if ex_files is not None
             else []
         )
-        task["ex_files"] = [Path(f).absolute() for f in task["ex_files"]]
-        task["sol_files"] = (
+        sol_files = (
             sol_files
             if isinstance(sol_files, list)
             else [sol_files]
             if sol_files is not None
             else []
         )
-        task["sol_files"] = [Path(f).absolute() for f in task["sol_files"]]
+        task["ex_files"] = [paths.relative_to(f, base) for f in ex_files]
+        task["sol_files"] = [paths.relative_to(f, base) for f in sol_files]
 
-        def read_file_to_string(fp: PathLike) -> str:
-            with open(fp, "r") as f:
-                return f.read()
+        task["exercise_code"] = [Path(f).read_text(encoding="utf-8") for f in ex_files]
+        task["solution_code"] = [Path(f).read_text(encoding="utf-8") for f in sol_files]
 
-        task["exercise_code"] = [read_file_to_string(f) for f in task["ex_files"]]
-        task["solution_code"] = [read_file_to_string(f) for f in task["sol_files"]]
-        task["tests"] = (
-            tests if isinstance(tests, list) else [tests] if tests is not None else []
-        )
+        tests = tests if isinstance(tests, list) else [tests] if tests is not None else []
+        task["tests"] = []
+        for test in tests:
+            # copied, so the caller's test keeps its path
+            test = copy.copy(test)
+            test.file_path = paths.relative_to(test.file_path, base)
+            task["tests"].append(test)
 
-        os.makedirs(fp.parent, exist_ok=True)
+        os.makedirs(base, exist_ok=True)
 
         match fp.suffixes:
             case []:
@@ -374,7 +395,7 @@ class Task:
                 )
                 fp = fp.with_suffix(fp.suffix + ".pyicstask.json")
 
-        with open(fp, "w") as f:
+        with open(fp, "w", encoding="utf-8") as f:
             json.dump(task, f, indent=4)
 
         return fp

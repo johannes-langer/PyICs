@@ -30,6 +30,7 @@ from pyics.tests.tests import PrintTest, SimpleTest, SpecTest, StructureTest
 
 _TOTAL_STEPS = 5
 _INFO = "Creating a new task..."
+_ENTER_TEXT = "Enter text"
 
 # Test types the CLI can create. Their constructor parameters are prompted for by
 # ``_prompt_test``, and the first line of their docstring is shown as a hint.
@@ -65,7 +66,8 @@ def _load_namespace(raw: str) -> dict[str, Any]:
     dunders and modules)."""
     path = _check_file(raw)
     namespace: dict[str, Any] = {}
-    exec(compile(path.read_text(), str(path), "exec"), namespace)  # noqa: S102
+    source = path.read_text(encoding="utf-8")
+    exec(compile(source, str(path), "exec"), namespace)  # noqa: S102
     return {
         k: v
         for k, v in namespace.items()
@@ -105,10 +107,26 @@ def _prompt_param(
     lines = [Text(problem, style="red")] if problem else []
     has_default = param.default is not param.empty
 
-    if param.annotation is str and not test_cls is PrintTest:
+    if param.annotation is str:
+        str_symbols = {k: v for k, v in symbols.items() if isinstance(v, str)}
+        if str_symbols:
+            hints = {k: reprlib.repr(v) for k, v in str_symbols.items()}
+            choice = s.ask(
+                SelectInput(param.name, [*str_symbols, _ENTER_TEXT], hints=hints)
+            )
+            if choice != _ENTER_TEXT:
+                return str_symbols[choice]
+
         initial = param.default if has_default else ""
         details = Group(*lines) if lines else None
-        return s.ask(TextInput(param.name, initial=initial, details=details))
+        return s.ask(
+            TextInput(
+                param.name,
+                initial=initial,
+                details=details,
+                multiline=test_cls is PrintTest and param.name == "expected",
+            )
+        )
 
     if test_cls is StructureTest and param.name == "rules":
         concepts = ", ".join(check_structure.CONCEPTS)

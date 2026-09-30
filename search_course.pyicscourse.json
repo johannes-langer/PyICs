@@ -2,10 +2,10 @@
     "name": "Search Algorithms",
     "tasks": {
         "Depth-First Search": {
-            "__pathlib__": "/Users/johannes/Documents/pyics/.tasks/dfs.pyicstask.json"
+            "__pathlib__": ".tasks/dfs.pyicstask.json"
         },
         "Breadth-First Search": {
-            "__pathlib__": "/Users/johannes/Documents/pyics/.tasks/bfs.pyicstask.json"
+            "__pathlib__": ".tasks/bfs.pyicstask.json"
         }
     },
     "progress": [
