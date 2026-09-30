@@ -10,6 +10,7 @@ from rich.console import RenderableType
 
 from pyics.data.task import Task
 from pyics.util import json_handling as json
+from pyics.util import paths
 from pyics.util.logging import get_logger
 
 
@@ -176,7 +177,8 @@ class Course:
     @classmethod
     def load_course_manifest(cls, fp: PathLike) -> Course:
         """
-        Load a course manifest to a ``Course`` object.
+        Load a course manifest to a ``Course`` object. Task file paths in the manifest
+        are relative to the manifest's directory (see ``create_course_manifest``).
 
         Parameters
         ----------
@@ -188,8 +190,11 @@ class Course:
         Course
             The Course object represented in the manifest
         """
-        with open(fp, "r") as f:
+        with open(fp, "r", encoding="utf-8") as f:
             data = json.load(f)
+
+        base = Path(fp).parent
+        data["tasks"] = {k: paths.resolve(v, base) for k, v in data["tasks"].items()}
 
         return cls(**data)
 
@@ -212,7 +217,10 @@ class Course:
             Path to the course manifest. Should have the suffix '.pyicscourse.json'. If
             it doesn't, makes changes to the suffix and logs (if logging is active).
         task_files: list[PathLike]
-            List of task files to compose the course. Order is relevant.
+            List of task files to compose the course. Order is relevant. Given relative
+            to the working directory (or absolute), and stored relative to the directory
+            of the manifest, so the course keeps working when it is moved together with
+            its tasks.
         name: str | None (optional, keyword only)
             Name of the course. If None, use ``fp``'s stem.
         use_task_names: bool (optional, keyword only)
@@ -251,7 +259,7 @@ class Course:
         if use_task_names:
 
             def get_task_name(fp: PathLike) -> str:
-                with open(fp, "r") as f:
+                with open(fp, "r", encoding="utf-8") as f:
                     name = json.load(f)["name"]
                 return name
 
@@ -263,12 +271,14 @@ class Course:
                 f"{manifest['name']}_{str(n).zfill(width)}" for n in range(len(task_files))
             ]
 
-        manifest["tasks"] = {k: v for k, v in zip(keys, task_files)}
+        manifest["tasks"] = {
+            k: paths.relative_to(v, fp.parent) for k, v in zip(keys, task_files)
+        }
 
         manifest["progress"] = [0] * len(task_files)
 
         os.makedirs(fp.parent, exist_ok=True)
-        with open(fp, "w") as f:
+        with open(fp, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=4)
 
         return fp

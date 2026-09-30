@@ -12,7 +12,7 @@ from _pytest.assertion.util import assertrepr_compare, dummy_highlighter
 
 import pyics.util.json_handling as json
 from pyics.tests.capture import capture_stdout, provide_input
-from . import check_specs
+from . import check_specs, check_structure
 
 
 class Test(ABC):
@@ -211,6 +211,36 @@ class SpecTest(Test):
         symb = getattr(m, self.symbol_name)
 
         if diff := check_specs.compare_spec(self.expected, symb, by_type=self.by_type):
+            raise AssertionError("\n".join(diff))
+
+
+class StructureTest(Test):
+    """
+    Source code uses (or avoids) constructs such as loops or recursion.
+
+    ``rules`` is a rule dict or a list of rule dicts (see ``check_structure``), e.g.
+    ``{"concept": "recursion", "scope": "fib"}``. The file is parsed, but not executed.
+    """
+
+    rules: list[check_structure.Rule]
+
+    def __init__(
+        self,
+        name: str,
+        file_path: PathLike,
+        rules: list[check_structure.Rule] | check_structure.Rule,
+        **kwargs,
+    ):
+        self.name = name
+        self.file_path = file_path
+        self.rules = check_structure.validate_rules(rules)
+
+    def run(self) -> None:
+        path = Path(self.file_path)
+        diff = check_structure.check_structure(
+            self.rules, path.read_text(encoding="utf-8"), filename=path.name
+        )
+        if diff:
             raise AssertionError("\n".join(diff))
 
 

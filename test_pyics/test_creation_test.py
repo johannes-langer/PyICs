@@ -16,7 +16,7 @@ from pyics.scripts.create_task import (
     _prompt_test,
     _prompt_tests,
 )
-from pyics.tests.tests import PrintTest, SimpleTest, SpecTest
+from pyics.tests.tests import PrintTest, SimpleTest, SpecTest, StructureTest
 
 DOWN, ENTER, BACKSPACE, CTRL_D = "DOWN", "\r", "\x7f", "\x04"
 
@@ -158,7 +158,8 @@ def test_unusable_match_is_prompted_for(tmp_path: Path, ex_files: list[Path]) ->
         [
             ENTER,
             *_type(str(info)),
-            *_type("n"),  # name isn't a str
+            # name isn't a str: enter text instead of picking the str 'function_name'
+            DOWN, ENTER, *_type("n"),
             ENTER,  # file_path
             ENTER, ENTER,  # function_args, function_kwargs: keep defaults
         ],
@@ -309,3 +310,19 @@ def test_print_test_is_offered(ex_files: list[Path]) -> None:
         lambda s: _prompt_tests(s, ex_files),
     )  # fmt: skip
     assert [type(test) for test in tests] == [PrintTest]
+
+
+def test_malformed_structure_rules_are_asked_again(ex_files: list[Path]) -> None:
+    test = _run_flow(
+        [
+            DOWN, ENTER,  # reference a file: no
+            *_type("t"),  # name
+            ENTER,  # file_path
+            *_type('{"concept": "loop", "max": -1}'),  # rules: negative max...
+            *[BACKSPACE] * 3, *_type("0}"),  # ...fixed
+        ],
+        lambda s: _prompt_test(s, StructureTest, ex_files),
+    )  # fmt: skip
+    assert isinstance(test, StructureTest)
+    assert test.rules == [{"concept": "loop", "max": 0}]
+    

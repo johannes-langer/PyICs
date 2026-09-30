@@ -25,15 +25,16 @@ from pyics.app.prompts import (
     TextInput,
 )
 from pyics.data.task import Task
-from pyics.tests import Test, check_specs
-from pyics.tests.tests import PrintTest, SimpleTest, SpecTest
+from pyics.tests import Test, check_specs, check_structure
+from pyics.tests.tests import PrintTest, SimpleTest, SpecTest, StructureTest
 
 _TOTAL_STEPS = 5
 _INFO = "Creating a new task..."
+_ENTER_TEXT = "Enter text"
 
 # Test types the CLI can create. Their constructor parameters are prompted for by
 # ``_prompt_test``, and the first line of their docstring is shown as a hint.
-_TEST_TYPES: list[type[Test]] = [SimpleTest, SpecTest, PrintTest]
+_TEST_TYPES: list[type[Test]] = [SimpleTest, SpecTest, StructureTest, PrintTest]
 _NO_MORE_TESTS = "Done"
 
 
@@ -54,6 +55,12 @@ def _prompt_files(s: PromptSession, kind: str) -> list[Path]:
     """Interactively collect a list of existing ``kind`` (e.g. "exercise") file paths,
     one at a time."""
     files: list[Path] = []
+
+    if kind == "solution":
+        # we do not need a solution file necessarily.
+        if not _confirm(s, f"Add a {kind} file?"):
+            return files
+
     while True:
         files.append(s.ask(PathInput(f"{kind.capitalize()} file path"), _check_file))
         if not _confirm(s, f"Add another {kind} file?"):
@@ -65,7 +72,8 @@ def _load_namespace(raw: str) -> dict[str, Any]:
     dunders and modules)."""
     path = _check_file(raw)
     namespace: dict[str, Any] = {}
-    exec(compile(path.read_text(), str(path), "exec"), namespace)  # noqa: S102
+    source = path.read_text(encoding="utf-8")
+    exec(compile(source, str(path), "exec"), namespace)  # noqa: S102
     return {
         k: v
         for k, v in namespace.items()
@@ -80,6 +88,8 @@ def _check(test_cls: type[Test], param: inspect.Parameter, value: Any) -> Any:
         # e.g. the solution's function itself, stored as its spec dict. Also validates
         # spec dicts now, rather than when the test is constructed.
         value = check_specs.to_spec_dict(value)
+    if test_cls is StructureTest and param.name == "rules":
+        value = check_structure.validate_rules(value)
     if param.annotation is str and not isinstance(value, str):
         raise TypeError(f"expected str, got {type(value).__name__}")
     if param.annotation == list[str] and not (
@@ -108,6 +118,15 @@ def _prompt_param(
     has_default = param.default is not param.empty
 
     if param.annotation is str:
+        str_symbols = {k: v for k, v in symbols.items() if isinstance(v, str)}
+        if str_symbols:
+            hints = {k: reprlib.repr(v) for k, v in str_symbols.items()}
+            choice = s.ask(
+                SelectInput(param.name, [*str_symbols, _ENTER_TEXT], hints=hints)
+            )
+            if choice != _ENTER_TEXT:
+                return str_symbols[choice]
+
         initial = param.default if has_default else ""
         details = Group(*lines) if lines else None
         multiline = test_cls is PrintTest and param.name == "expected"
@@ -115,6 +134,9 @@ def _prompt_param(
             TextInput(param.name, multiline=multiline, initial=initial, details=details)
         )
 
+    if test_cls is StructureTest and param.name == "rules":
+        concepts = ", ".join(check_structure.CONCEPTS)
+        lines.append(Text(f"Concepts: {concepts}", style="dim"))
     if symbols:
         lines.append(Text("Variables in scope:", style="dim"))
         lines.extend(
@@ -195,9 +217,7 @@ def _check_name(name: str, taken_names: Collection[str]) -> str:
     return name
 
 
-def _task_flow(
-    s: PromptSession, *, taken_names: Collection[str] = ()
-) -> dict[str, Any]:
+def _task_flow(s: PromptSession, *, taken_names: Collection[str] = ()) -> dict[str, Any]:
     """
     The full task-creation flow. Replayed by ``PromptSession`` whenever the user goes
     back, so it must ask the same prompts given the same answers. The task name may not

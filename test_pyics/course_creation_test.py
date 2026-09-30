@@ -12,6 +12,7 @@ import pytest
 import pyics.util.json_handling as json
 from pyics.app.prompts import PromptCancelled, PromptSession, ReorderInput
 from pyics.scripts.create_course import _check_path, _course_flow, _find_task_files
+from pyics.scripts.create_task import _TEST_TYPES
 
 UP, DOWN, ENTER, ESC, SPACE, CTRL_C = "UP", "DOWN", "\r", "\x1b", " ", "\x03"
 
@@ -179,8 +180,8 @@ def test_new_task_is_not_written(
             *_type("Task"),
             "I", "\x04",  # instructions
             *_type(str(ex)), DOWN, ENTER,  # one exercise file
-            *_type(str(sol)), DOWN, ENTER,  # one solution file
-            DOWN, DOWN, DOWN, ENTER,  # no tests
+            ENTER, *_type(str(sol)), DOWN, ENTER,  # add a solution file: yes, just one
+            *[DOWN] * len(_TEST_TYPES), ENTER,  # no tests
             ENTER,  # task file path: keep the default
             DOWN, ENTER,  # done, no reordering for a single task
         ],

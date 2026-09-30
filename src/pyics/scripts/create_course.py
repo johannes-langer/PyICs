@@ -69,7 +69,7 @@ def _find_task_files(root: Path, max_depth: int) -> dict[Path, str]:
                 continue
             path = Path(dirpath, filename)
             try:
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     name = json.load(f)["name"]
             except Exception:  # noqa: BLE001
                 get_logger(__name__).debug(f"Skipping {path}", exc_info=True)

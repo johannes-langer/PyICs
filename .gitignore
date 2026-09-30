@@ -17,7 +17,6 @@ dev.ipynb
 # task file dirs
 .exercises/
 .solutions/
-.tasks/
 .tests/
 .courses/
 
@@ -25,3 +24,6 @@ dev.ipynb
 .pyics.log
 dfs_simple_test.py
 bfs_simple_test.py
+
+# local documentation
+structure_test.md
