@@ -11,6 +11,7 @@ import pytest
 
 from pyics.app.prompts import PromptCancelled, PromptSession
 from pyics.scripts.create_task import (
+    _TEST_TYPES,
     _check_file,
     _prompt_files,
     _prompt_test,
@@ -302,10 +303,10 @@ def test_print_test_inputs_must_be_strings_in_a_list(
 def test_print_test_is_offered(ex_files: list[Path]) -> None:
     tests = _run_flow(
         [
-            DOWN, DOWN, ENTER,  # PrintTest
+            *[DOWN] * _TEST_TYPES.index(PrintTest), ENTER,  # PrintTest
             DOWN, ENTER, *_type("t"), ENTER,  # no info file, name, file_path
             CTRL_D, ENTER,  # expected: no output, inputs: keep []
-            DOWN, DOWN, DOWN, ENTER,  # done
+            *[DOWN] * len(_TEST_TYPES), ENTER,  # done
         ],
         lambda s: _prompt_tests(s, ex_files),
     )  # fmt: skip
