@@ -92,6 +92,10 @@ def _check(test_cls: type[Test], param: inspect.Parameter, value: Any) -> Any:
         value = check_structure.validate_rules(value)
     if param.annotation is str and not isinstance(value, str):
         raise TypeError(f"expected str, got {type(value).__name__}")
+    if param.annotation == list[str] and not (
+        isinstance(value, list) and all(isinstance(v, str) for v in value)
+    ):
+        raise TypeError(f"expected a list of str, got {reprlib.repr(value)}")
     # checked now, rather than when the task file is written after all other fields
     json.dumps(value)
     return value
@@ -106,9 +110,9 @@ def _prompt_param(
 ) -> Any:
     """
     Ask for the value of the ``test_cls`` constructor parameter ``param``, prefilled with
-    its default: plain text for ``str`` parameters, otherwise a Python expression,
-    evaluated with ``symbols`` in scope. ``problem``, if not empty, is shown below the
-    input.
+    its default: plain text for ``str`` parameters (on several lines for the expected
+    output of a ``PrintTest``), otherwise a Python expression, evaluated with ``symbols``
+    in scope. ``problem``, if not empty, is shown below the input.
     """
     lines = [Text(problem, style="red")] if problem else []
     has_default = param.default is not param.empty
@@ -125,13 +129,9 @@ def _prompt_param(
 
         initial = param.default if has_default else ""
         details = Group(*lines) if lines else None
+        multiline = test_cls is PrintTest and param.name == "expected"
         return s.ask(
-            TextInput(
-                param.name,
-                initial=initial,
-                details=details,
-                multiline=test_cls is PrintTest and param.name == "expected",
-            )
+            TextInput(param.name, multiline=multiline, initial=initial, details=details)
         )
 
     if test_cls is StructureTest and param.name == "rules":

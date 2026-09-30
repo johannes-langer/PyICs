@@ -1,3 +1,4 @@
+import copy
 import importlib.util as iutil
 import sys
 from abc import ABC, abstractmethod
@@ -10,7 +11,7 @@ from typing import Any, Protocol
 from _pytest.assertion.util import assertrepr_compare, dummy_highlighter
 
 import pyics.util.json_handling as json
-from pyics.tests.capture import capture_stdout
+from pyics.tests.capture import capture_stdout, provide_input
 from . import check_specs, check_structure
 
 
@@ -30,7 +31,11 @@ class Test(ABC):
     def __call__(self) -> None:
         self.run()
 
-    def load_solution(self) -> ModuleType:
+    def load_solution(self, *, as_main: bool = False) -> ModuleType:
+        """
+        Run the file at ``file_path`` as a new module, and return it. With ``as_main``,
+        it is run as a script, i.e. with ``__name__ == "__main__"``.
+        """
         spec: ModuleSpec | None = iutil.spec_from_file_location(
             name="current_solution", location=self.file_path
         )
@@ -40,8 +45,14 @@ class Test(ABC):
             raise AttributeError("spec.loader cannot be None.")
 
         module = iutil.module_from_spec(spec)
+        if as_main:
+            module.__name__ = "__main__"
         sys.modules["current_solution"] = module
-        spec.loader.exec_module(module)
+        # compiled from source rather than run by the loader, whose cached bytecode is
+        # stale if the file was saved twice within a second without changing its size
+        source = Path(self.file_path).read_bytes()
+        code = compile(source, self.file_path, "exec", dont_inherit=True)
+        exec(code, module.__dict__)  # noqa: S102
 
         return module
 
@@ -53,30 +64,62 @@ class Test(ABC):
     def run(self) -> None: ...
 
 
+def _visible(output: str) -> str:
+    """``output`` without the whitespace that isn't visible in a console: at the end of
+    lines, and blank lines at the end."""
+    return "\n".join(line.rstrip() for line in output.split("\n")).rstrip("\n")
+
+
 class PrintTest(Test):
-    """console output of file needs to match"""
+    """
+    Console output of a file must match the desired output.
+
+    The file is run as a script (with ``__name__ == "__main__"``) until it ends or exits,
+    e.g. by calling ``sys.exit()``. Its ``input()`` calls are answered with ``inputs``,
+    in order, which show up in the output like answers typed into a console. Whitespace
+    that isn't visible in a console is ignored. Only the output of the thread running the
+    test is captured, so that other threads (e.g. the CLI's) can keep writing to the
+    console in the meantime.
+    """
 
     expected: str  # printout is necessarily str
+    inputs: list[str]
 
-    def __init__(self, name: str, file_path: PathLike, expected: str, **kwargs):
+    def __init__(
+        self,
+        name: str,
+        file_path: PathLike,
+        expected: str,
+        *,
+        inputs: list[str] = [],
+        **kwargs,
+    ):
+        if isinstance(inputs, str):
+            raise TypeError("inputs must be a list, with an answer per input() call")
         self.name = name
         self.file_path = file_path
         self.expected = expected
+        self.inputs = [str(answer) for answer in inputs]
 
     def run(self) -> None:
-        with capture_stdout() as buffer:
-            self.load_solution()
-        if (res := buffer.getvalue()) != self.expected:
+        with capture_stdout() as buffer, provide_input(self.inputs):
+            try:
+                self.load_solution(as_main=True)
+            except SystemExit:
+                pass  # the program ended
+        res, expected = _visible(buffer.getvalue()), _visible(self.expected)
+
+        if res != expected:
             expl = list(
                 assertrepr_compare(
                     "==",
                     res,
-                    self.expected,
+                    expected,
                     verbose=1,
                     highlighter=dummy_highlighter,
                     assertion_text_diff_style="ndiff",
                 )
-            ) or [f"{res!r} == {self.expected!r}"]
+            ) or [f"{res!r} == {expected!r}"]
 
             raise AssertionError("\n".join(expl))
 
@@ -112,7 +155,11 @@ class SimpleTest(Test):
     def run(self) -> None:
         m = self.load_solution()
         func = getattr(m, self.function_name)
-        res = func(*self.function_args, **self.function_kwargs)
+        # copied, so a solution that modifies its arguments can't change them for the
+        # next run of this test
+        res = func(
+            *copy.deepcopy(self.function_args), **copy.deepcopy(self.function_kwargs)
+        )
 
         if res != self.expected:
             expl = list(

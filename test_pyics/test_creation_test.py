@@ -10,10 +10,15 @@ from unittest.mock import MagicMock
 import pytest
 
 from pyics.app.prompts import PromptCancelled, PromptSession
-from pyics.scripts.create_task import _check_file, _prompt_files, _prompt_test
-from pyics.tests.tests import SimpleTest, SpecTest, StructureTest
+from pyics.scripts.create_task import (
+    _check_file,
+    _prompt_files,
+    _prompt_test,
+    _prompt_tests,
+)
+from pyics.tests.tests import PrintTest, SimpleTest, SpecTest, StructureTest
 
-DOWN, ENTER, BACKSPACE = "DOWN", "\r", "\x7f"
+DOWN, ENTER, BACKSPACE, CTRL_D = "DOWN", "\r", "\x7f", "\x04"
 
 INFO_FILE = """
 edges = [("A", "B", 4), ("B", "C", 5)]
@@ -239,6 +244,74 @@ def test_malformed_spec_is_asked_again(ex_files: list[Path]) -> None:
     assert test.expected == {"is_class": False}
 
 
+def _run_print_test(keys: list[str], ex_files: list[Path]) -> PrintTest:
+    test = _run_flow(keys, lambda s: _prompt_test(s, PrintTest, ex_files))
+    assert isinstance(test, PrintTest)
+    return test
+
+
+def test_print_test_expected_output_spans_lines(ex_files: list[Path]) -> None:
+    test = _run_print_test(
+        [
+            DOWN, ENTER,  # reference a file: no
+            *_type("t"),  # name
+            ENTER,  # file_path
+            *"Name: Bob", ENTER, *"Hello, Bob!", CTRL_D,  # expected: enter adds a line
+            BACKSPACE, BACKSPACE, *_type('["Bob"]'),  # inputs, prefilled with []
+        ],
+        ex_files,
+    )  # fmt: skip
+    assert test.expected == "Name: Bob\nHello, Bob!"
+    assert test.inputs == ["Bob"]
+
+
+def test_print_test_from_info_file(tmp_path: Path, ex_files: list[Path]) -> None:
+    info = tmp_path / "info.py"
+    info.write_text(
+        'name = "greeting"\nexpected = "Name: Bob\\nHello, Bob!\\n"\ninputs = ["Bob"]\n'
+    )
+    test = _run_print_test(
+        [
+            ENTER, *_type(str(info)),  # reference the info file
+            ENTER,  # file_path; name, expected, inputs: exact matches
+        ],
+        ex_files,
+    )  # fmt: skip
+    assert (test.name, test.expected) == ("greeting", "Name: Bob\nHello, Bob!\n")
+    assert test.inputs == ["Bob"]
+
+
+@pytest.mark.parametrize("rejected", ['"Bob"', "[42]"])
+def test_print_test_inputs_must_be_strings_in_a_list(
+    ex_files: list[Path], rejected: str
+) -> None:
+    test = _run_print_test(
+        [
+            DOWN, ENTER,  # reference a file: no
+            *_type("t"),  # name
+            ENTER,  # file_path
+            CTRL_D,  # expected: no output
+            BACKSPACE, BACKSPACE, *_type(rejected),  # inputs...
+            *[BACKSPACE] * len(rejected), *_type('["Bob"]'),  # ...fixed
+        ],
+        ex_files,
+    )  # fmt: skip
+    assert (test.expected, test.inputs) == ("", ["Bob"])
+
+
+def test_print_test_is_offered(ex_files: list[Path]) -> None:
+    tests = _run_flow(
+        [
+            DOWN, DOWN, ENTER,  # PrintTest
+            DOWN, ENTER, *_type("t"), ENTER,  # no info file, name, file_path
+            CTRL_D, ENTER,  # expected: no output, inputs: keep []
+            DOWN, DOWN, DOWN, ENTER,  # done
+        ],
+        lambda s: _prompt_tests(s, ex_files),
+    )  # fmt: skip
+    assert [type(test) for test in tests] == [PrintTest]
+
+
 def test_malformed_structure_rules_are_asked_again(ex_files: list[Path]) -> None:
     test = _run_flow(
         [
@@ -252,3 +325,4 @@ def test_malformed_structure_rules_are_asked_again(ex_files: list[Path]) -> None
     )  # fmt: skip
     assert isinstance(test, StructureTest)
     assert test.rules == [{"concept": "loop", "max": 0}]
+    
