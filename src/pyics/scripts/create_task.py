@@ -25,15 +25,15 @@ from pyics.app.prompts import (
     TextInput,
 )
 from pyics.data.task import Task
-from pyics.tests import Test, check_specs
-from pyics.tests.tests import SimpleTest, SpecTest
+from pyics.tests import Test, check_specs, check_structure
+from pyics.tests.tests import PrintTest, SimpleTest, SpecTest, StructureTest
 
 _TOTAL_STEPS = 5
 _INFO = "Creating a new task..."
 
 # Test types the CLI can create. Their constructor parameters are prompted for by
 # ``_prompt_test``, and the first line of their docstring is shown as a hint.
-_TEST_TYPES: list[type[Test]] = [SimpleTest, SpecTest]
+_TEST_TYPES: list[type[Test]] = [SimpleTest, SpecTest, StructureTest, PrintTest]
 _NO_MORE_TESTS = "Done"
 
 
@@ -80,6 +80,8 @@ def _check(test_cls: type[Test], param: inspect.Parameter, value: Any) -> Any:
         # e.g. the solution's function itself, stored as its spec dict. Also validates
         # spec dicts now, rather than when the test is constructed.
         value = check_specs.to_spec_dict(value)
+    if test_cls is StructureTest and param.name == "rules":
+        value = check_structure.validate_rules(value)
     if param.annotation is str and not isinstance(value, str):
         raise TypeError(f"expected str, got {type(value).__name__}")
     # checked now, rather than when the task file is written after all other fields
@@ -103,11 +105,14 @@ def _prompt_param(
     lines = [Text(problem, style="red")] if problem else []
     has_default = param.default is not param.empty
 
-    if param.annotation is str:
+    if param.annotation is str and not test_cls is PrintTest:
         initial = param.default if has_default else ""
         details = Group(*lines) if lines else None
         return s.ask(TextInput(param.name, initial=initial, details=details))
 
+    if test_cls is StructureTest and param.name == "rules":
+        concepts = ", ".join(check_structure.CONCEPTS)
+        lines.append(Text(f"Concepts: {concepts}", style="dim"))
     if symbols:
         lines.append(Text("Variables in scope:", style="dim"))
         lines.extend(
@@ -188,9 +193,7 @@ def _check_name(name: str, taken_names: Collection[str]) -> str:
     return name
 
 
-def _task_flow(
-    s: PromptSession, *, taken_names: Collection[str] = ()
-) -> dict[str, Any]:
+def _task_flow(s: PromptSession, *, taken_names: Collection[str] = ()) -> dict[str, Any]:
     """
     The full task-creation flow. Replayed by ``PromptSession`` whenever the user goes
     back, so it must ask the same prompts given the same answers. The task name may not

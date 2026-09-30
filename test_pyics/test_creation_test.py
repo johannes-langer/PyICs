@@ -11,7 +11,7 @@ import pytest
 
 from pyics.app.prompts import PromptCancelled, PromptSession
 from pyics.scripts.create_task import _check_file, _prompt_files, _prompt_test
-from pyics.tests.tests import SimpleTest, SpecTest
+from pyics.tests.tests import SimpleTest, SpecTest, StructureTest
 
 DOWN, ENTER, BACKSPACE = "DOWN", "\r", "\x7f"
 
@@ -236,3 +236,18 @@ def test_malformed_spec_is_asked_again(ex_files: list[Path]) -> None:
         ex_files,
     )  # fmt: skip
     assert test.expected == {"is_class": False}
+
+
+def test_malformed_structure_rules_are_asked_again(ex_files: list[Path]) -> None:
+    test = _run_flow(
+        [
+            DOWN, ENTER,  # reference a file: no
+            *_type("t"),  # name
+            ENTER,  # file_path
+            *_type('{"concept": "loop", "max": -1}'),  # rules: negative max...
+            *[BACKSPACE] * 3, *_type("0}"),  # ...fixed
+        ],
+        lambda s: _prompt_test(s, StructureTest, ex_files),
+    )  # fmt: skip
+    assert isinstance(test, StructureTest)
+    assert test.rules == [{"concept": "loop", "max": 0}]
