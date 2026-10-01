@@ -22,6 +22,8 @@ dependencies = [
 pyics = "pyics.scripts.main:run"
 create_task = "pyics.scripts.create_task:create_task"
 create_course = "pyics.scripts.create_course:create_course"
+edit_task = "pyics.scripts.edit_task:edit_task"
+edit_course = "pyics.scripts.edit_course:edit_course"
 
 [build-system]
 requires = ["uv_build>=0.11.8,<0.12.0"]

@@ -16,13 +16,22 @@ _The ``PyICs`` app is currently still in development an not ready to be used._
 
 ### Scripts
 
-There are currently three scripts configured which consitute the main functionalities of the app. While tests are configured for nearly all features of the app, you may want to run the scripts for testing, especially the main ``pyics`` script.
+There are currently five scripts configured which consitute the main functionalities of the app. While tests are configured for nearly all features of the app, you may want to run the scripts for testing, especially the main ``pyics`` script.
 
 The available scripts are the following:
 
 1. ``uv run pyics`` (the main app)
 2. ``uv run create_task`` (create a single task)
 3. ``uv run create_course`` (create a course, potentially calling create_task to create new tasks instead of selecting existing ones)
+4. ``uv run edit_task <task_file>`` (edit a task, going through create_task with everything prefilled)
+5. ``uv run edit_course <course_file>`` (edit a course, going through create_course with everything prefilled; its tasks can be kept, edited, or removed)
+
+When editing, confirming every prompt leaves the task or course as it was. Changes are carried over to whatever depends on them:
+
+* Tests of an exercise file that is replaced test the new file instead, and tests of a removed exercise file have to be edited or removed.
+* The contents of exercise and solution files are stored in the task file. If a file on disk differs from its stored contents, you choose which to keep, seeing the difference.
+* If a task is renamed, so is its entry in the course manifests below the working directory that include it.
+* The progress stored in a course follows its tasks when they are reordered or removed.
 
 
 In the top level directory, there is the ``search_course.pyicscourse.json``, which is a demo course that _should_ be found. When running the main script, it is currently automatically selected one of the two tests should be failing.

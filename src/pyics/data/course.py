@@ -205,6 +205,7 @@ class Course:
         *,
         name: Optional[str] = None,
         use_task_names: bool = True,
+        progress: Optional[list[int]] = None,
     ) -> Path:
         """
         Compose a course manifest from the provided ``task_files``. A course manifest is
@@ -227,6 +228,9 @@ class Course:
             Use tasks' names for the mapping in the course manifest. Default is True.
             Setting this to False increases performance (no more json loading of tasks),
             but loses information (only enumerates tasks).
+        progress: list[int] | None (optional, keyword only)
+            Progress of each task, in the order of ``task_files``. Default is None, i.e.
+            no task solved yet.
 
         Returns
         -------
@@ -275,10 +279,19 @@ class Course:
             k: paths.relative_to(v, fp.parent) for k, v in zip(keys, task_files)
         }
 
-        manifest["progress"] = [0] * len(task_files)
+        if progress is None:
+            progress = [0] * len(task_files)
+        elif len(progress) != len(task_files):
+            raise ValueError(
+                f"got progress for {len(progress)} tasks, but {len(task_files)} tasks"
+            )
+        manifest["progress"] = list(progress)
 
+        # serialized before the file is opened, so a manifest that is being edited isn't
+        # left empty if serializing fails
+        text = json.dumps(manifest, indent=4)
         os.makedirs(fp.parent, exist_ok=True)
         with open(fp, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, indent=4)
+            f.write(text)
 
         return fp

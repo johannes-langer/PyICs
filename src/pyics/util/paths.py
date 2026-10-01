@@ -25,3 +25,11 @@ def resolve(path: PathLike, base: PathLike) -> Path:
     kept as they are.
     """
     return Path(os.path.normpath(Path(base) / path))
+
+
+def absolute(path: PathLike) -> Path:
+    """
+    ``path`` as an absolute, normalized path (``a/../b`` becomes ``b``), so that paths
+    given relative to different directories can be compared.
+    """
+    return Path(os.path.abspath(path))
