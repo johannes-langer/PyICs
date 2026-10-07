@@ -2,7 +2,6 @@ import sys
 from os import PathLike
 from pathlib import Path
 
-import jsonargparse
 from rich.markup import escape
 
 from pyics.app.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI, SHOW_CURSOR
@@ -75,7 +74,3 @@ def _edit_task(task_file: PathLike, max_depth: int = 3) -> None:
         sys.stdout.flush()
     # after leaving the alternate screen, so that it stays visible
     print(message)
-
-
-def edit_task() -> None:
-    jsonargparse.auto_cli(_edit_task)

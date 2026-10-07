@@ -292,6 +292,6 @@ class Course:
         text = json.dumps(manifest, indent=4)
         os.makedirs(fp.parent, exist_ok=True)
         with open(fp, "w", encoding="utf-8") as f:
-            f.write(text)
+            f.write(text)  # pyright: ignore[reportArgumentType]
 
         return fp

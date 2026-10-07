@@ -16,15 +16,15 @@ _The ``PyICs`` app is currently still in development an not ready to be used._
 
 ### Scripts
 
-There are currently five scripts configured which consitute the main functionalities of the app. While tests are configured for nearly all features of the app, you may want to run the scripts for testing, especially the main ``pyics`` script.
+There is currently one script configured, ``pyics``, whose subcommands constitute the main functionalities of the app. While tests are configured for nearly all features of the app, you may want to run the commands for testing, especially the main app.
 
-The available scripts are the following:
+The available commands are the following:
 
 1. ``uv run pyics`` (the main app)
-2. ``uv run create_task`` (create a single task)
-3. ``uv run create_course`` (create a course, potentially calling create_task to create new tasks instead of selecting existing ones)
-4. ``uv run edit_task <task_file>`` (edit a task, going through create_task with everything prefilled)
-5. ``uv run edit_course <course_file>`` (edit a course, going through create_course with everything prefilled; its tasks can be kept, edited, or removed)
+2. ``uv run pyics create_task`` (create a single task)
+3. ``uv run pyics create_course`` (create a course, potentially calling create_task to create new tasks instead of selecting existing ones)
+4. ``uv run pyics edit_task <task_file>`` (edit a task, going through create_task with everything prefilled)
+5. ``uv run pyics edit_course <course_file>`` (edit a course, going through create_course with everything prefilled; its tasks can be kept, edited, or removed)
 
 When editing, confirming every prompt leaves the task or course as it was. Changes are carried over to whatever depends on them:
 

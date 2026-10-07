@@ -361,7 +361,7 @@ class Task:
         tests: Union[Test, list[Test], None] = None,
         file_contents: Mapping[PathLike, str] | None = None,
     ) -> Path:
-        """TODO
+        """
         Create a task_json from all relevant information as it would naturally be available
         when designing a task.
 
@@ -459,6 +459,6 @@ class Task:
         # isn't left empty if serializing fails
         text = json.dumps(task, indent=4)
         with open(fp, "w", encoding="utf-8") as f:
-            f.write(text)
+            f.write(text)  # pyright: ignore[reportArgumentType]
 
         return fp

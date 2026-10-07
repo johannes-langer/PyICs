@@ -10,7 +10,6 @@ from pathlib import Path, PurePath
 from types import ModuleType
 from typing import Any
 
-import jsonargparse
 from rich.console import Group, RenderableType
 from rich.markup import escape
 from rich.syntax import Syntax
@@ -128,9 +127,7 @@ def _diff(stored: str, on_disk: str) -> RenderableType:
             stored.splitlines(), on_disk.splitlines(), "stored", "on disk", lineterm=""
         )
     )
-    shown = Syntax(
-        "\n".join(lines[:_MAX_DIFF_LINES]), "diff", background_color="default"
-    )
+    shown = Syntax("\n".join(lines[:_MAX_DIFF_LINES]), "diff", background_color="default")
     if len(lines) <= _MAX_DIFF_LINES:
         return shown
     more = Text(f"... {len(lines) - _MAX_DIFF_LINES} more lines", style="dim")
@@ -345,7 +342,7 @@ def _prompt_test(
             prompt = SelectInput(param.name, [str(f) for f in ex_files])
             if value is not param.empty:
                 options = {paths.absolute(f): str(f) for f in ex_files}
-                prompt.set_answer(options.get(paths.absolute(value), ""))
+                prompt.set_answer(options.get(paths.absolute(value), ""))  # pyright: ignore[reportArgumentType]
             kwargs[param.name] = Path(s.ask(prompt)).absolute()
             continue
 
@@ -543,7 +540,3 @@ def _create_task(fp: PathLike | None = None) -> None:
         sys.stdout.write(SHOW_CURSOR)
         sys.stdout.write(ALT_SCREEN_LEAVE)
         sys.stdout.flush()
-
-
-def create_task() -> None:
-    jsonargparse.auto_cli(_create_task)

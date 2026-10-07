@@ -4,7 +4,6 @@ from os import PathLike
 from pathlib import Path
 from typing import Any
 
-import jsonargparse
 from rich.markup import escape
 
 import pyics.util.json_handling as json
@@ -137,7 +136,3 @@ def _edit_course(course_file: PathLike, max_depth: int = 3) -> None:
         sys.stdout.flush()
     # after leaving the alternate screen, so that it stays visible
     print(message)
-
-
-def edit_course() -> None:
-    jsonargparse.auto_cli(_edit_course)

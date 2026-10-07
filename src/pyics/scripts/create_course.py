@@ -5,7 +5,6 @@ from os import PathLike
 from pathlib import Path, PurePath
 from typing import Any, NamedTuple
 
-import jsonargparse
 from rich.console import Group
 from rich.markup import escape
 from rich.text import Text
@@ -382,7 +381,3 @@ def _create_course(fp: PathLike | None = None, max_depth: int = 3) -> None:
         sys.stdout.write(SHOW_CURSOR)
         sys.stdout.write(ALT_SCREEN_LEAVE)
         sys.stdout.flush()
-
-
-def create_course() -> None:
-    jsonargparse.auto_cli(_create_course)
