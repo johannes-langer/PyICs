@@ -32,6 +32,7 @@ CURSOR_MARKER = ""
 class CLI:
     def __init__(self) -> None:
         self.running = False
+        self._thread: threading.Thread | None = None
         self.console = Console()
         self.progress = Progress(
             TextColumn("[progress.description]{task.description}"),
@@ -76,8 +77,17 @@ class CLI:
         Start up the cli Daemon.
         """
         self.running = True
-        thread = threading.Thread(target=self.run, daemon=True)
-        thread.start()
+        self._thread = threading.Thread(target=self.run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        """
+        Stop the cli Daemon, waiting for a frame that is being drawn, so that nothing is
+        drawn once this returns (e.g. after leaving the alternate screen).
+        """
+        self.running = False
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout=1)
 
     def generate_header(self) -> Panel:
         """

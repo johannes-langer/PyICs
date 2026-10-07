@@ -1,6 +1,9 @@
 """
-Rendering of the CLI's header, and redrawing the interface.
+Rendering of the CLI's header, redrawing the interface, and stopping it.
 """
+
+import threading
+import time
 
 import pytest
 from rich.markup import escape
@@ -50,3 +53,20 @@ def test_changes_made_while_drawing_are_drawn_next(
     monkeypatch.setattr(cli, "_lines_to_text", update_after_content_was_read)
     cli.draw_interface()
     assert cli._needs_redraw
+
+
+def test_nothing_is_drawn_after_stop(cli: CLI, monkeypatch: pytest.MonkeyPatch) -> None:
+    """E.g. once a script has left the alternate screen."""
+    drawing = threading.Event()
+    draw_interface = cli.draw_interface
+
+    def slow_draw() -> None:
+        drawing.set()
+        time.sleep(0.2)
+        draw_interface()
+
+    monkeypatch.setattr(cli, "draw_interface", slow_draw)
+    cli()
+    assert drawing.wait(timeout=5)  # stopped while a frame is drawn
+    cli.stop()
+    assert cli._thread is not None and not cli._thread.is_alive()

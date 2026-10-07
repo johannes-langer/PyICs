@@ -196,6 +196,7 @@ def test_new_task_is_not_written(
                 "ex_files": [ex],
                 "sol_files": [sol],
                 "tests": None,
+                "file_contents": {},
             },
         )
     ]

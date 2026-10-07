@@ -1,11 +1,13 @@
 import os
 import sys
+from collections.abc import Iterator, Mapping
 from os import PathLike
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePath
+from typing import Any, NamedTuple
 
-import jsonargparse
+from rich.console import Group
 from rich.markup import escape
+from rich.text import Text
 
 import pyics.util.json_handling as json
 from pyics.app.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI, SHOW_CURSOR
@@ -20,13 +22,15 @@ from pyics.app.prompts import (
 )
 from pyics.data.course import Course
 from pyics.data.task import Task
-from pyics.scripts.create_task import _check_name, _task_flow
+from pyics.scripts.create_task import _EDIT, _KEEP, _REMOVE, _check_name, _task_flow
+from pyics.util import paths
 from pyics.util.logging import get_logger
 
 _TOTAL_STEPS = 3
 _INFO = "Creating a new course..."
 
 _TASK_SUFFIX = ".pyicstask.json"
+_COURSE_SUFFIX = ".pyicscourse.json"
 # never searched for task files: large, and never contain any
 _SKIP_DIRS = {
     ".git",
@@ -42,9 +46,45 @@ _ADD_EXISTING = "Add an existing task"
 _ADD_NEW = "Create a new task"
 _NO_MORE_TASKS = "Done"
 
-# A task of the course: its file path, and for tasks created in the flow (not yet
-# written), the keyword arguments for ``Task.create_task_json``.
+_TASK_HINTS = {
+    _KEEP: "Keep the task as it is.",
+    _EDIT: "Go through the task-creation flow, prefilled with the task. Its task file is "
+    "rewritten once the course is done.",
+    _REMOVE: "Remove the task from the course. Its task file is kept.",
+}
+
+# A task of the course: its file path, and for tasks created or edited in the flow (not
+# yet written), the keyword arguments for ``Task.create_task_json``.
 _Entry = tuple[Path, dict[str, Any] | None]
+
+
+class _CourseTask(NamedTuple):
+    """A task of a course that is being edited."""
+
+    path: Path
+    # the task's name, or its name in the course manifest if its task file can't be read
+    name: str
+    # the task's fields (see ``Task.read_task_json``), None if its task file can't be read
+    fields: dict[str, Any] | None
+    # names the task can't be renamed to: those of the other tasks in other courses that
+    # include it
+    taken_elsewhere: frozenset[str] = frozenset()
+    # why the task file can't be read
+    problem: str = ""
+
+
+def _find_files(root: Path, max_depth: int, suffix: str) -> Iterator[Path]:
+    """The files whose names end in ``suffix`` at most ``max_depth`` directories below
+    ``root``, skipping ``_SKIP_DIRS``, relative to ``root``."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        rel = Path(dirpath).relative_to(root)
+        if len(rel.parts) >= max_depth:
+            dirnames.clear()
+        else:
+            dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
+        for filename in sorted(filenames):
+            if filename.endswith(suffix):
+                yield rel / filename
 
 
 def _find_task_files(root: Path, max_depth: int) -> dict[Path, str]:
@@ -58,25 +98,96 @@ def _find_task_files(root: Path, max_depth: int) -> dict[Path, str]:
         The task files' paths, relative to ``root``, mapped to their task names.
     """
     found: dict[Path, str] = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        rel = Path(dirpath).relative_to(root)
-        if len(rel.parts) >= max_depth:
-            dirnames.clear()
-        else:
-            dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
-        for filename in sorted(filenames):
-            if not filename.endswith(_TASK_SUFFIX):
-                continue
-            path = Path(dirpath, filename)
-            try:
-                with open(path, encoding="utf-8") as f:
-                    name = json.load(f)["name"]
-            except Exception:  # noqa: BLE001
-                get_logger(__name__).debug(f"Skipping {path}", exc_info=True)
-                continue
-            if isinstance(name, str):
-                found[rel / filename] = name
+    for rel in _find_files(root, max_depth, _TASK_SUFFIX):
+        try:
+            with open(root / rel, encoding="utf-8") as f:
+                name = json.load(f)["name"]
+        except Exception:  # noqa: BLE001
+            get_logger(__name__).debug(f"Skipping {root / rel}", exc_info=True)
+            continue
+        if isinstance(name, str):
+            found[rel] = name
     return found
+
+
+def _find_courses(root: Path, max_depth: int) -> dict[Path, dict[str, Any]]:
+    """
+    Find course manifests at most ``max_depth`` directories below ``root``, skipping
+    ``_SKIP_DIRS``. Files that can't be read or have no tasks are skipped.
+
+    Returns
+    -------
+    dict[Path, dict[str, Any]]
+        The manifests' absolute paths, mapped to their contents.
+    """
+    found: dict[Path, dict[str, Any]] = {}
+    for rel in _find_files(root, max_depth, _COURSE_SUFFIX):
+        path = paths.absolute(root / rel)
+        try:
+            with open(path, encoding="utf-8") as f:
+                manifest = json.load(f)
+            tasks = manifest["tasks"]
+        except Exception:  # noqa: BLE001
+            get_logger(__name__).debug(f"Skipping {path}", exc_info=True)
+            continue
+        if isinstance(tasks, dict) and all(
+            isinstance(v, (str, PurePath)) for v in tasks.values()
+        ):
+            found[path] = manifest
+    return found
+
+
+def _course_tasks(fp: Path, manifest: Mapping[str, Any]) -> dict[str, Path]:
+    """The tasks of the course ``manifest`` read from ``fp``, by name, with their task
+    files' absolute paths."""
+    base = Path(fp).parent
+    return {
+        k: paths.absolute(paths.resolve(v, base)) for k, v in manifest["tasks"].items()
+    }
+
+
+def _names_taken_elsewhere(
+    task_file: PathLike, courses: Mapping[Path, Mapping[str, Any]]
+) -> frozenset[str]:
+    """The names of the other tasks in the ``courses`` (see ``_find_courses``) that
+    include ``task_file``, which the task can't be renamed to."""
+    task = paths.absolute(task_file)
+    taken: set[str] = set()
+    for fp, manifest in courses.items():
+        tasks = _course_tasks(fp, manifest)
+        if task in tasks.values():
+            taken.update(k for k, v in tasks.items() if v != task)
+    return frozenset(taken)
+
+
+def _rename_in_courses(
+    task_file: PathLike, name: str, courses: dict[Path, dict[str, Any]]
+) -> list[Path]:
+    """
+    Rename the task ``task_file`` to ``name`` in the ``courses`` (see ``_find_courses``)
+    that include it under another name, keeping its position in them, and rewrite their
+    manifests. ``courses`` is updated to match.
+
+    Returns
+    -------
+    list[Path]
+        The rewritten manifests.
+    """
+    task = paths.absolute(task_file)
+    renamed: list[Path] = []
+    for fp, manifest in courses.items():
+        tasks = _course_tasks(fp, manifest)
+        if not any(v == task and k != name for k, v in tasks.items()):
+            continue
+        manifest["tasks"] = {
+            name if tasks[k] == task else k: v for k, v in manifest["tasks"].items()
+        }
+        # serialized before the file is opened, so it isn't left empty if that fails
+        text = json.dumps(manifest, indent=4)
+        with open(fp, "w", encoding="utf-8") as f:
+            f.write(text)
+        renamed.append(fp)
+    return renamed
 
 
 def _prompt_task_file(
@@ -84,8 +195,10 @@ def _prompt_task_file(
 ) -> Path:
     """Ask for one of the ``found`` task files that isn't in the course yet. Its task name
     must be new to the course, too."""
-    selected = {p for p, _ in tasks.values()}
-    labels = {f"{n} ({p})": p for p, n in found.items() if p not in selected}
+    selected = {paths.absolute(p) for p, _ in tasks.values()}
+    labels = {
+        f"{n} ({p})": p for p, n in found.items() if paths.absolute(p) not in selected
+    }
 
     def check(label: str) -> Path:
         _check_name(found[labels[label]], tasks)
@@ -100,15 +213,19 @@ def _check_path(raw: str, tasks: dict[str, _Entry]) -> Path:
     path = Path(raw)
     if not path.name or path.is_dir():
         raise ValueError(f"{raw!r} is not a file path")
-    if path.absolute() in {p.absolute() for p, _ in tasks.values()}:
+    if paths.absolute(path) in {paths.absolute(p) for p, _ in tasks.values()}:
         raise ValueError(f"the course already has a task at {raw!r}")
     return path
 
 
-def _prompt_tasks(s: PromptSession, found: dict[Path, str]) -> dict[str, _Entry]:
+def _prompt_tasks(
+    s: PromptSession, found: dict[Path, str], current: list[_CourseTask] | None = None
+) -> dict[str, _Entry]:
     """
     Interactively collect at least one task, each either one of the ``found`` task files
-    or created on the fly with the task-creation flow.
+    or created on the fly with the task-creation flow. When editing a course, its
+    ``current`` tasks are kept, edited or removed first, and adding more is not
+    preselected.
 
     Returns
     -------
@@ -116,6 +233,36 @@ def _prompt_tasks(s: PromptSession, found: dict[Path, str]) -> dict[str, _Entry]
         The tasks by name, in the order they were added.
     """
     tasks: dict[str, _Entry] = {}
+    for i, task in enumerate(current or [], 1):
+        s.cli.update_progress(1 / _TOTAL_STEPS)
+
+        options, problem = [_KEEP, _EDIT, _REMOVE], task.problem
+        if task.fields is None:
+            options = [_REMOVE]
+        elif task.name in tasks:
+            options = [_EDIT, _REMOVE]
+            problem = (
+                f"Another task of the course is named {task.name!r}, so the task needs "
+                "to be renamed or removed."
+            )
+        lines = [Text(problem, style="red")] if problem else []
+        lines.append(Text(str(task.path), style="dim"))
+
+        label = f"Task {i} of {len(current or [])}: {escape(task.name)}"
+        details = Group(*lines)
+        choice = s.ask(SelectInput(label, options, hints=_TASK_HINTS, details=details))
+        if choice == _REMOVE:
+            continue
+
+        fields = None
+        if choice == _EDIT:
+            # not the name of another task of the course, including those still to come
+            # (which are most likely kept), nor of one in another course with the task
+            taken = {*tasks, *(t.name for t in (current or [])[i:])}
+            taken |= task.taken_elsewhere
+            fields = _task_flow(s, taken_names=taken, current=task.fields)
+        tasks[fields["name"] if fields else task.name] = (task.path, fields)
+
     hints = {
         _ADD_EXISTING: "Pick one of the task files found below the working directory.",
         _ADD_NEW: "Define a new task, written to a task file once the course is done.",
@@ -125,16 +272,18 @@ def _prompt_tasks(s: PromptSession, found: dict[Path, str]) -> dict[str, _Entry]
         s.cli.update_progress(1 / _TOTAL_STEPS)
 
         # offered only while some found task file isn't in the course yet
-        selected = {p for p, _ in tasks.values()}
-        options = [_ADD_EXISTING] if found.keys() - selected else []
+        selected = {paths.absolute(p) for p, _ in tasks.values()}
+        unselected = any(paths.absolute(p) not in selected for p in found)
+        options = [_ADD_EXISTING] if unselected else []
         options.append(_ADD_NEW)
         if tasks:  # a course can't be empty
             options.append(_NO_MORE_TASKS)
         hints[_NO_MORE_TASKS] = f"Finish adding tasks ({len(tasks)} added so far)."
 
-        kind = s.ask(
-            SelectInput("How do you want to add a task?", options, hints=hints)
-        )
+        prompt = SelectInput("How do you want to add a task?", options, hints=hints)
+        if current is not None:
+            prompt.set_answer(_NO_MORE_TASKS)
+        kind = s.ask(prompt)
         if kind == _NO_MORE_TASKS:
             return tasks
 
@@ -150,11 +299,19 @@ def _prompt_tasks(s: PromptSession, found: dict[Path, str]) -> dict[str, _Entry]
         tasks[fields["name"]] = (s.ask(prompt, lambda p: _check_path(p, tasks)), fields)
 
 
-def _course_flow(s: PromptSession, found: dict[Path, str]) -> dict[str, Any]:
+def _course_flow(
+    s: PromptSession,
+    found: dict[Path, str],
+    current: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     The full course-creation flow. Replayed by ``PromptSession`` whenever the user goes
     back, so it must ask the same prompts given the same answers, and must not write any
     files.
+
+    With ``current``, the ``name`` and ``tasks`` (as ``_CourseTask``) of an existing
+    course, the course is edited instead: every prompt is prefilled with its current
+    value, so that confirming all of them leaves the course as it was.
 
     Returns
     -------
@@ -162,9 +319,10 @@ def _course_flow(s: PromptSession, found: dict[Path, str]) -> dict[str, Any]:
         The course ``name``, and its ``tasks`` as ``_Entry`` tuples, in course order.
     """
     s.cli.update_progress(0 / _TOTAL_STEPS)
-    name = s.ask(TextInput("Course name"), lambda n: _check_name(n, ()))
+    prompt = TextInput("Course name", initial=current["name"] if current else "")
+    name = s.ask(prompt, lambda n: _check_name(n, ()))
 
-    tasks = _prompt_tasks(s, found)
+    tasks = _prompt_tasks(s, found, current["tasks"] if current else None)
 
     s.cli.update_progress(2 / _TOTAL_STEPS)
     order = list(tasks)
@@ -223,7 +381,3 @@ def _create_course(fp: PathLike | None = None, max_depth: int = 3) -> None:
         sys.stdout.write(SHOW_CURSOR)
         sys.stdout.write(ALT_SCREEN_LEAVE)
         sys.stdout.flush()
-
-
-def create_course() -> None:
-    jsonargparse.auto_cli(_create_course)
