@@ -34,6 +34,9 @@ nested class names to nested specs::
         },
     }
 
+Class specs include inherited attributes, methods, properties and nested classes. A class
+without an ``__init__`` is compared as if it had ``def __init__(self) -> None``.
+
 ``is_class`` and ``return`` are reserved keys, so they can not be used as parameter or
 attribute names.
 """
@@ -62,6 +65,8 @@ _CHECKED_DUNDERS = ("__init__", "__call__", "__str__", "__repr__")
 # module prefixes stripped from type strings, in addition to the symbol's own module
 _STRIPPED_MODULES = ("typing", "collections.abc", "builtins")
 _NO_DEFAULT = object()
+# compared against if a class defines no ``__init__``, i.e. inherits ``object.__init__``
+_IMPLICIT_INIT: SpecDict = {"is_class": False, "return": "None"}
 
 
 def compare_spec(
@@ -209,31 +214,43 @@ def _property_to_dict(prop: property, module: str | None) -> SpecDict:
 
 
 def _class_to_dict(cls: type) -> SpecDict:
-    module = cls.__module__
     spec: SpecDict = {"is_class": True}
+    # the class itself and its bases, most derived first. ``object`` contributes no
+    # Python functions, its dunders would only be noise
+    bases = [klass for klass in cls.__mro__ if klass is not object]
 
-    # attributes: annotated ones (incl. inherited) and those assigned in methods
+    # attributes: annotated ones and those assigned in methods, incl. inherited ones
     hints = typing.get_type_hints(cls, format=annotationlib.Format.FORWARDREF)
-    for name in dict.fromkeys([*hints, *getattr(cls, "__static_attributes__", ())]):
-        spec[name] = _format_type(hints.get(name, inspect.Parameter.empty), module)
+    static = [
+        a for k in reversed(bases) for a in getattr(k, "__static_attributes__", ())
+    ]
+    for name in dict.fromkeys([*hints, *static]):
+        spec[name] = _format_type(
+            hints.get(name, inspect.Parameter.empty), cls.__module__
+        )
 
-    # methods, properties and nested classes
-    for name, member in cls.__dict__.items():
-        if name.startswith("__") and name not in _CHECKED_DUNDERS:
-            continue
+    # methods, properties and nested classes, incl. inherited ones. The most derived
+    # definition of a name wins, even if it is no method (e.g. ``method = None``)
+    seen: set[str] = set()
+    for klass in bases:
+        module = klass.__module__
+        for name, member in klass.__dict__.items():
+            if name in seen or (name.startswith("__") and name not in _CHECKED_DUNDERS):
+                continue
+            seen.add(name)
 
-        if isinstance(member, staticmethod):
-            spec[name] = _func_to_dict(member.__func__, module)
-        elif isinstance(member, classmethod) or inspect.isfunction(member):
-            func = getattr(member, "__func__", member)
-            spec[name] = _func_to_dict(func, module, drop_first=True)
-        elif isinstance(member, property):
-            spec[name] = _property_to_dict(member, module)
-        elif (
-            inspect.isclass(member)
-            and member.__qualname__ == f"{cls.__qualname__}.{name}"
-        ):
-            spec[name] = _class_to_dict(member)
+            if isinstance(member, staticmethod):
+                spec[name] = _func_to_dict(member.__func__, module)
+            elif isinstance(member, classmethod) or inspect.isfunction(member):
+                func = getattr(member, "__func__", member)
+                spec[name] = _func_to_dict(func, module, drop_first=True)
+            elif isinstance(member, property):
+                spec[name] = _property_to_dict(member, module)
+            elif (
+                inspect.isclass(member)
+                and member.__qualname__ == f"{klass.__qualname__}.{name}"
+            ):
+                spec[name] = _class_to_dict(member)
 
     return spec
 
@@ -494,6 +511,8 @@ def _compare_class(exp: SpecDict, oth: SpecDict, o: _Options) -> list[str]:
     # methods, properties and nested classes, always matched by name
     for name, exp_m in exp_members.items():
         what = _describe(exp_m)
+        if name == "__init__" and name not in oth_members and name not in oth_attrs:
+            oth_members = {**oth_members, name: _IMPLICIT_INIT}
         if name in oth_members and _describe(oth_members[name]) == what:
             diffs.extend(
                 f"{what.capitalize()} {o.q(name)}: {d}"
