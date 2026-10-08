@@ -52,8 +52,7 @@ def find_task_files(root: Path, max_depth: int) -> dict[Path, str]:
     found: dict[Path, str] = {}
     for rel in find_files(root, max_depth, TASK_SUFFIX):
         try:
-            with open(root / rel, encoding="utf-8") as f:
-                name = json.load(f)["name"]
+            name = json.load_plain(root / rel)["name"]
         except Exception:  # noqa: BLE001
             get_logger(__name__).debug(f"Skipping {root / rel}", exc_info=True)
             continue
@@ -76,8 +75,8 @@ def find_courses(root: Path, max_depth: int) -> dict[Path, dict[str, Any]]:
     for rel in find_files(root, max_depth, COURSE_SUFFIX):
         path = paths.absolute(root / rel)
         try:
-            with open(path, encoding="utf-8") as f:
-                manifest = json.load(f)
+            # read as plain data, so finding courses never imports a module
+            manifest = json.load_plain(path)
             tasks = manifest["tasks"]
         except Exception:  # noqa: BLE001
             get_logger(__name__).debug(f"Skipping {path}", exc_info=True)

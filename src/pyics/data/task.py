@@ -14,6 +14,7 @@ from rich.table import Table
 from rich.text import Text
 
 import pyics.util.json_handling as json
+from pyics.distribution.dependencies import ModulePolicy, check_task_data
 from pyics.util import paths, terminal
 from pyics.util.paths import StrPath
 from pyics.util.logging import get_logger
@@ -64,6 +65,18 @@ def _path_list(files: StrPath | Sequence[StrPath] | None) -> list[StrPath]:
     return list(files)
 
 
+def _load_task_json(fp: StrPath, module_policy: ModulePolicy | None = None) -> dict:
+    """
+    Read and decode the task file at ``fp``, once it has been checked that decoding it
+    imports only modules ``module_policy`` allows (if given), which are installed (see
+    ``check_task_data``).
+    """
+    with open(fp, "r", encoding="utf-8") as f:
+        text = f.read()
+    check_task_data(json.loads_plain(text), fp, module_policy)
+    return json.loads(text)
+
+
 def _hint_list(hints: str | Sequence[str] | None) -> list[str]:
     """``hints`` as a list of hints, whether given as one hint, several or None."""
     if hints is None:
@@ -84,7 +97,13 @@ class Task:
     # whether the current test results were traced
     __traced: bool = False
 
-    def __init__(self, task_file: StrPath, *, setup: bool = True):
+    def __init__(
+        self,
+        task_file: StrPath,
+        *,
+        setup: bool = True,
+        module_policy: ModulePolicy | None = None,
+    ):
         """
         Parses a task from a task json-file.
 
@@ -99,10 +118,19 @@ class Task:
             Create the task's files and run its tests (see ``setup``). Default is True.
             If False, the task can only be checked (see ``check_solved``) until ``setup``
             is called.
+        module_policy: ModulePolicy | None (optional, keyword only)
+            The modules the task file may name to decode the objects stored in it, i.e.
+            those its course declares (see ``ModulePolicy``). If None, any module.
+
+        Raises
+        ------
+        ModuleNotAllowedError
+            If the task file names a module ``module_policy`` doesn't allow.
+        MissingDependencyError
+            If the task needs a package that isn't installed.
         """
         self.__path = task_file
-        with open(task_file, "r", encoding="utf-8") as f:
-            raw_json: dict = json.load(f)
+        raw_json = _load_task_json(task_file, module_policy)
 
         base = Path(task_file).parent
 
@@ -453,8 +481,7 @@ class Task:
             ``help``, and the contents stored for the exercise and solution files as
             ``file_contents``, by path.
         """
-        with open(fp, "r", encoding="utf-8") as f:
-            raw_json: dict = json.load(f)
+        raw_json = _load_task_json(fp)
 
         base = Path(fp).parent
 

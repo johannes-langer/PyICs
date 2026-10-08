@@ -285,6 +285,17 @@ def test_script_keeps_the_course(
     assert {p: p.read_text() for p in (A, B, C)} == tasks
 
 
+def test_script_keeps_the_courses_metadata(
+    course_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E.g. the packages it needs, which aren't edited here (see ``pyics pack``)."""
+    metadata = {"version": "1.0", "requires": ["numpy"], "slug": "c"}
+    manifest = _manifest(course_file)
+    course_file.write_text(json.dumps({**manifest, **metadata}, indent=4))
+    _run_script(monkeypatch, KEEP_ALL, course_file)
+    assert {k: _manifest(course_file).get(k) for k in metadata} == metadata
+
+
 def test_progress_follows_the_tasks(
     course_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
