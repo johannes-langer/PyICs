@@ -17,12 +17,15 @@ from rich.segment import Segment
 from rich.table import Table
 from rich.text import Text, TextType
 
-LINE_UP = "\033[1A"
-LINE_CLEAR = "\x1b[2K"
-HIDE_CURSOR = "\033[?25l"
-SHOW_CURSOR = "\033[?25h"
-ALT_SCREEN_ENTER = "\033[?1049h"
-ALT_SCREEN_LEAVE = "\033[?1049l"
+# the escape codes not used here are re-exported, as they used to be defined here
+from pyics.util.terminal import (  # noqa: F401
+    ALT_SCREEN_ENTER,
+    ALT_SCREEN_LEAVE,
+    HIDE_CURSOR,
+    LINE_CLEAR,
+    LINE_UP,
+    SHOW_CURSOR,
+)
 
 # Private-use codepoint that input widgets (see pyics.app.prompts) embed in the main content
 # to mark where the terminal cursor goes. Stripped before the frame is written.

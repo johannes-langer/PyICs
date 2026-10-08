@@ -8,9 +8,11 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "colorama>=0.4.6 ; sys_platform == 'win32'",
     "ipykernel>=7.3.0",
     "json-tricks>=3.17.3",
     "jsonargparse>=4.48.0",
+    "prompt-toolkit>=3.0.53",
     "pyfiglet>=1.0.4",
     "pytest>=9.0.3",
     "rich>=15.0.0",

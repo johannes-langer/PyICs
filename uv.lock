@@ -431,9 +431,11 @@ name = "pyics"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
     { name = "ipykernel" },
     { name = "json-tricks" },
     { name = "jsonargparse" },
+    { name = "prompt-toolkit" },
     { name = "pyfiglet" },
     { name = "pytest" },
     { name = "rich" },
@@ -443,9 +445,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "colorama", marker = "sys_platform == 'win32'", specifier = ">=0.4.6" },
     { name = "ipykernel", specifier = ">=7.3.0" },
     { name = "json-tricks", specifier = ">=3.17.3" },
     { name = "jsonargparse", specifier = ">=4.48.0" },
+    { name = "prompt-toolkit", specifier = ">=3.0.53" },
     { name = "pyfiglet", specifier = ">=1.0.4" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "rich", specifier = ">=15.0.0" },
