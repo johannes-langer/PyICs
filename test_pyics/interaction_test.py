@@ -8,7 +8,6 @@ files are saved to have the current task's tests run.
 
 import json
 import os
-import signal
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -193,7 +192,6 @@ class App:
     def resize(self, width: int, height: int) -> None:
         """Resize the terminal."""
         self.cli.console.size = (width, height)
-        os.kill(os.getpid(), signal.SIGWINCH)
 
     def press(self, *keys: str) -> None:
         for key in keys:
@@ -659,7 +657,7 @@ def run_main(
 
     def run() -> str:
         threading.Thread(target=cancel_course_selector, daemon=True).start()
-        main.main()  # in the main thread, as the CLI handles signals
+        main.main()
         return "".join(terminal.stdout.written)
 
     return run

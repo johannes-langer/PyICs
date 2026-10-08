@@ -1,5 +1,4 @@
 import importlib.metadata
-import signal
 import sys
 import threading
 import time
@@ -9,7 +8,7 @@ from pyfiglet import Figlet
 from rich import box
 from rich.align import Align
 from rich.cells import cell_len
-from rich.console import Console, Group, RenderableType
+from rich.console import Console, ConsoleDimensions, Group, RenderableType
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, TextColumn
@@ -36,7 +35,8 @@ class CLI:
     def __init__(self) -> None:
         self.running = False
         self._thread: threading.Thread | None = None
-        self.console = Console()
+        # escape codes are written on Windows, too (see ``pyics.util.terminal``)
+        self.console = Console(legacy_windows=False)
         self.progress = Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(
@@ -61,19 +61,14 @@ class CLI:
         # whether the terminal cursor is shown at a CURSOR_MARKER in the main content
         self.cursor_visible = True
 
+        # the terminal size the last frame was drawn for, to redraw it once that changes
+        self._drawn_size: ConsoleDimensions | None = None
+
         self.update_info("Ready")
         self.update_main_content(
             Text("Main program outputs will appear here...", style="dim"), "Main Output"
         )
         self.update_progress(0.0)
-
-        signal.signal(signal.SIGWINCH, self._handle_resize)
-
-    def _handle_resize(self, signum, frame):
-        """
-        Resize handler to attach to the SIGWINCH signal.
-        """
-        self._needs_redraw = True
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         """
@@ -261,6 +256,8 @@ class CLI:
         # (e.g. from other threads) are drawn by the next one
         self._needs_redraw = False
         follow_cursor, self._follow_cursor = self._follow_cursor, False
+        # likewise, a frame drawn while the terminal is resized is drawn again
+        self._drawn_size = self.console.size
         header_panel = self.generate_header()
         footer_panel = self.generate_footer()
 
@@ -271,7 +268,7 @@ class CLI:
             box=box.SIMPLE,
         )
 
-        term_height = self.console.size.height
+        term_height = self._drawn_size.height
 
         header_lines = self._render_lines(header_panel)
         footer_lines = self._render_lines(footer_panel)
@@ -322,7 +319,9 @@ class CLI:
 
         try:
             while self.running:
-                self.draw_interface() if self._needs_redraw else None
+                # the size is polled, as only Unix signals a resize
+                if self._needs_redraw or self.console.size != self._drawn_size:
+                    self.draw_interface()
 
                 time.sleep(0.05)
 
