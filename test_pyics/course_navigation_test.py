@@ -32,6 +32,7 @@ class _FakeTask:
     def __init__(self, path: Path, *, setup: bool = True) -> None:
         self.path = path
         self.is_set_up = setup
+        self.help = ["first", "second"]
 
     def setup(self) -> None:
         self.is_set_up = True
@@ -106,6 +107,28 @@ def test_previous_goes_back(course: Course) -> None:
 
     assert _path(course.previous()) == A
     assert course.task_changed
+
+
+# --- hints ---
+
+
+def test_hints_are_revealed_one_at_a_time(course: Course) -> None:
+    assert course.hints == []
+    assert course.reveal_hint()
+    assert course.hints == ["first"]
+    assert course.reveal_hint()
+    assert course.hints == ["first", "second"]
+    assert not course.reveal_hint()  # no hint left
+    assert course.hints == ["first", "second"]
+
+
+def test_revealed_hints_are_kept_per_task(course: Course) -> None:
+    course.reveal_hint()
+    _FakeTask.solved_paths.add(A)
+    course.next()
+    assert course.hints == []  # B's are still hidden
+    course.previous()
+    assert course.hints == ["first"]  # although A is loaded anew
 
 
 # --- starting ---
@@ -188,6 +211,7 @@ def test_course_is_loading_until_a_task_to_start_on_is_found(
     assert course.check_status == "Checking your progress... (task 1/3)"
     assert course.next() is None and course.previous() is None
     assert course.instructions == "" and course.exercise_files == []
+    assert not course.reveal_hint() and course.hints == []
     release.set()
     _wait_for_check(course)
     assert not course.loading

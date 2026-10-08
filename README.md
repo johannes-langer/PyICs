@@ -37,6 +37,8 @@ When editing, confirming every prompt leaves the task or course as it was. Chang
 * If a task is renamed, so is its entry in the course manifests below the working directory that include it.
 * The progress stored in a course follows its tasks when they are reordered or removed.
 
+Tasks can have hints (``help`` in the task file), which ``create_task`` and ``edit_task`` ask for after the instructions. In the main app, <kbd>h</kbd> reveals the current task's next hint above its test results, one at a time and in order. Revealed hints stay revealed until the app is quit, also when you go to another task and back.
+
 
 The main app starts with a course selector, listing the course manifests found in the working directory and up to two directories below it (``.venv``, ``.git`` and the like are skipped). <kbd>c</kbd> goes back to it from a course, and <kbd>esc</kbd> from there returns to the course that was left. Courses left this way resume where they were left. Progress isn't stored in the course manifest: when a course is opened, the progress is checked from the exercise files on disk, task by task, and the course starts on the first unsolved task. Existing exercise files are never overwritten.
 

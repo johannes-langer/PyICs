@@ -120,12 +120,17 @@ class CLI:
         """
         Construct the footer from the hotkey and progress bar attributes.
         """
-        hotkeys_text = Text()
-        for i, (key, action) in enumerate(self.hotkeys.items()):
-            if i > 0:
-                hotkeys_text.append(" | ", style="dim")
-            hotkeys_text.append(f"<{key}>", style="bold cyan")
-            hotkeys_text.append(f" {action}")
+        # wrapped between hotkeys only, so a hotkey isn't separated from its action
+        width = self.console.width - 4  # the panel's borders and padding
+        lines: list[Text] = []
+        for key, action in self.hotkeys.items():
+            hotkey = Text.assemble((f"<{key}>", "bold cyan"), f" {action}")
+            if lines and lines[-1].cell_len + 3 + hotkey.cell_len <= width:
+                lines[-1].append(" | ", style="dim")
+                lines[-1].append_text(hotkey)
+            else:
+                lines.append(hotkey)
+        hotkeys_text = Text("\n", justify="center").join(lines)
 
         self.progress.update(self.task_id, completed=self.percentage)
 
