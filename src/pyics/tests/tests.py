@@ -15,6 +15,13 @@ from pyics.tests.capture import capture_stdout, provide_input
 from . import check_specs, check_structure
 
 
+class MarkupAssertionError(AssertionError):
+    """
+    ``AssertionError`` whose message is ``rich`` markup, which is rendered in the main
+    panel. Messages of other exceptions are shown as they are.
+    """
+
+
 class Test(ABC):
     """Base Class for Tests"""
 
@@ -211,7 +218,7 @@ class SpecTest(Test):
         symb = getattr(m, self.symbol_name)
 
         if diff := check_specs.compare_spec(self.expected, symb, by_type=self.by_type):
-            raise AssertionError("\n".join(diff))
+            raise MarkupAssertionError("\n".join(diff))
 
 
 class StructureTest(Test):
@@ -241,7 +248,7 @@ class StructureTest(Test):
             self.rules, path.read_text(encoding="utf-8"), filename=path.name
         )
         if diff:
-            raise AssertionError("\n".join(diff))
+            raise MarkupAssertionError("\n".join(diff))
 
 
 class SizeTest(Test):

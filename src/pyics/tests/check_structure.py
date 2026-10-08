@@ -614,6 +614,10 @@ def _find_scope(tree: ast.Module, scope: str) -> ast.AST | None:
 class _Markup:
     rich: bool
 
+    def text(self, text: str) -> str:
+        """``text`` as it is, escaped if rich markup is used"""
+        return escape(text) if self.rich else text
+
     def b(self, text: Any) -> str:
         """bold ``text``, if rich markup is used"""
         return f"[b]{escape(str(text))}[/]" if self.rich else str(text)
@@ -750,5 +754,5 @@ def _evaluate(rule: Rule, ctx: _Context, scope: str | None) -> list[str]:
         ]
 
     if messages and "message" in rule:
-        return [rule["message"]]
+        return [o.text(rule["message"])]
     return messages

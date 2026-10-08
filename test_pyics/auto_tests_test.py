@@ -10,10 +10,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from rich.console import Console
 
 import pyics.util.json_handling as json
+from pyics.data import Task
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin
-from pyics.tests.tests import PrintTest, SimpleTest
+from pyics.tests.tests import MarkupAssertionError, PrintTest, SimpleTest, SpecTest
 
 SOLUTION = """
 def add(a, b=0):
@@ -351,3 +353,45 @@ def test_run_through_pytest(
         ("::raises", "failed", "raises failed: boom"),
         ("::prints", "passed", ""),
     ]
+
+
+
+def test_failures_are_highlighted_in_the_task_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)  # pytest writes its cache to the working directory
+    ex = tmp_path / "ex.py"
+    ex.write_text("def f(xs: list[int]) -> str:\n    return '[b]' + str(xs)\n")
+    tests = [
+        SpecTest("spec [b]check[/]", ex, "f", {"is_class": False, "xs": "list[str]"}),
+        SimpleTest("simple", ex, "f", "[b]x[/]", function_args=[[]]),
+    ]
+    task_file = Task.create_task_json(tmp_path / "t", "t", "", ex, ex, tests)
+    task = Task(task_file, setup=False)
+    assert not task.check_solved()
+
+    segments = list(Console(width=200).render(task.status))
+    text = "".join(s.text for s in segments)
+    # the markup of the spec check is rendered, everything else is shown as it is
+    assert (
+        "spec [b]check[/] failed: Parameter 'xs' type mismatch. "
+        "Expected list[str], got list[int]."
+    ) in text
+    assert "simple failed: '[b][]' == '[b]x[/]'" in text
+    bold = {s.text for s in segments if s.style and s.style.bold}
+    assert {"'xs'", "list[str]", "list[int]"} <= bold
+
+
+def test_malformed_markup_is_shown_as_it_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Malformed(SimpleTest):
+        def run(self) -> None:
+            raise MarkupAssertionError("[/] closes nothing")
+
+    monkeypatch.chdir(tmp_path)
+    plugin = LiveTestCollectionPlugin([Malformed("t", tmp_path, "f", None)])
+    pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
+
+    [report] = [r for r in plugin.reports if r.when == "call"]
+    assert report.longreprtext == "t failed: [/] closes nothing"

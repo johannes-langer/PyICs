@@ -306,6 +306,11 @@ def test_rich_markup():
     assert message == "Expected no [b]`xs\\[b]`[/], found [b]2[/] (lines 1, 2)."
 
 
+def test_custom_message_is_escaped_for_rich_markup():
+    rules = {"pattern": "xs[i]", "max": 0, "message": "Don't index [i]tems."}
+    assert check_structure(rules, "xs[i]") == ["Don't index \\[i]tems."]
+
+
 # combinators ##########################################################################
 
 
