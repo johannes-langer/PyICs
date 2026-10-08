@@ -1,24 +1,25 @@
 """
 Simulate interaction with the UI and the test files.
 
-The main interface runs like ``pyics`` runs it: keys are typed into a pseudo-terminal
-standing in for the keyboard, frames are read from what the interface draws to stdout,
-and exercise files are saved to have the current task's tests run.
+The main interface runs like ``pyics`` runs it: keys are typed into a pipe standing in
+for the keyboard, frames are read from what the interface draws to stdout, and exercise
+files are saved to have the current task's tests run.
 """
 
 import json
 import os
 import signal
-import sys
-import termios
 import threading
 import time
 from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import NamedTuple
 
 import pytest
+from prompt_toolkit.input import PipeInput, create_pipe_input
+from prompt_toolkit.key_binding import KeyPress
 
 from pyics.app.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI, SHOW_CURSOR
 from pyics.app.pyics import PyIC
@@ -136,10 +137,37 @@ class _Stdout:
             self.frame = text
 
 
+class _Keyboard:
+    """
+    Stands in for the terminal's input, which the ``KeyListener`` reads keys from: keys
+    are typed into a pipe as the terminal sends them. Typing and reading are serialized,
+    as on Windows, the pipe parses keys in the thread they are typed in.
+    """
+
+    def __init__(self, pipe: PipeInput) -> None:
+        self._pipe = pipe
+        self._lock = threading.Lock()
+
+    def send_text(self, text: str) -> None:
+        with self._lock:
+            self._pipe.send_text(text)
+
+    def raw_mode(self) -> AbstractContextManager[None]:
+        return self._pipe.raw_mode()
+
+    def read_keys(self) -> list[KeyPress]:
+        with self._lock:
+            return self._pipe.read_keys()
+
+    def flush_keys(self) -> list[KeyPress]:
+        with self._lock:
+            return self._pipe.flush_keys()
+
+
 class App:
     """The main interface, set up like ``pyics`` does."""
 
-    def __init__(self, keyboard: int, stdout: _Stdout) -> None:
+    def __init__(self, keyboard: _Keyboard, stdout: _Stdout) -> None:
         self.keyboard = keyboard
         self.stdout = stdout
         self.cli = CLI()
@@ -169,7 +197,7 @@ class App:
 
     def press(self, *keys: str) -> None:
         for key in keys:
-            os.write(self.keyboard, key.encode())
+            self.keyboard.send_text(key)
             # typing speed, so e.g. esc isn't read as the start of the next key
             time.sleep(0.05)
 
@@ -197,31 +225,30 @@ class App:
 
 
 class _Terminal(NamedTuple):
-    keyboard: int  # typed into, to press keys
+    keyboard: _Keyboard  # typed into, to press keys
     stdout: _Stdout
 
 
 @pytest.fixture
 def terminal(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Terminal]:
-    """A pseudo-terminal standing in for stdin, and stdout as the CLI writes to it."""
-    keyboard, terminal = os.openpty()
-    stdin = open(terminal)  # noqa: SIM115 - closed on teardown
-    monkeypatch.setattr(sys, "stdin", stdin)
-    # replaced where the CLI looks it up, as pytest's output capturing resets
-    # sys.stdout between the setup, call and teardown of a test
-    stdout = _Stdout()
-    monkeypatch.setattr("pyics.app.cli.sys", SimpleNamespace(stdout=stdout))
-    threads = set(threading.enumerate())
-    try:
-        yield _Terminal(keyboard, stdout)
-    finally:
-        for thread in set(threading.enumerate()) - threads:
-            thread.join(TIMEOUT)
-        # the app's own pytest runs remove this when they finish, but pytest expects it
-        # to be set until this test is torn down
-        os.environ.setdefault("PYTEST_CURRENT_TEST", "")
-        stdin.close()
-        os.close(keyboard)
+    """A keyboard standing in for the terminal's input, and stdout as the CLI writes to
+    it."""
+    with create_pipe_input() as pipe:
+        keyboard = _Keyboard(pipe)
+        monkeypatch.setattr("pyics.app.key_listener._terminal_input", lambda: keyboard)
+        # replaced where the CLI looks it up, as pytest's output capturing resets
+        # sys.stdout between the setup, call and teardown of a test
+        stdout = _Stdout()
+        monkeypatch.setattr("pyics.app.cli.sys", SimpleNamespace(stdout=stdout))
+        threads = set(threading.enumerate())
+        try:
+            yield _Terminal(keyboard, stdout)
+        finally:
+            for thread in set(threading.enumerate()) - threads:
+                thread.join(TIMEOUT)
+            # the app's own pytest runs remove this when they finish, but pytest
+            # expects it to be set until this test is torn down
+            os.environ.setdefault("PYTEST_CURRENT_TEST", "")
 
 
 @pytest.fixture
@@ -240,7 +267,7 @@ def launch(terminal: _Terminal) -> Iterator[Callable[[], App]]:
     for app in apps:
         if app.pyics.thread.is_alive():
             # cancels the course selector, if it is shown, or quits
-            os.write(terminal.keyboard, CTRL_C.encode())
+            terminal.keyboard.send_text(CTRL_C)
         app.pyics.running = app.cli.running = False
 
 
@@ -276,11 +303,9 @@ def test_startup_shows_the_first_task(app: App, exercises: tuple[Path, Path]) ->
 # --- keys ---
 
 
-def test_ctrl_c_quits_and_restores_the_terminal(app: App) -> None:
-    assert not termios.tcgetattr(sys.stdin)[3] & termios.ICANON  # raw mode
+def test_ctrl_c_quits(app: App) -> None:
     app.quit()
     assert not app.cli.running
-    assert termios.tcgetattr(sys.stdin)[3] & termios.ICANON
 
 
 @pytest.mark.parametrize(
@@ -401,7 +426,6 @@ def test_without_a_course_the_app_quits(
     app = launch()
     app.wait_until_quit()
     assert app.pyics.exit_message == _no_course_message()
-    assert termios.tcgetattr(sys.stdin)[3] & termios.ICANON
 
 
 def test_unusable_manifests_are_not_offered(
@@ -498,7 +522,6 @@ def test_ctrl_c_in_the_course_selector_quits(
     app.wait_for(lambda: app.selecting)
     app.quit()
     assert app.pyics.exit_message is None
-    assert termios.tcgetattr(sys.stdin)[3] & termios.ICANON
 
 
 def test_c_goes_back_to_the_course_selector(other_course: Path, app: App) -> None:
@@ -529,7 +552,6 @@ def test_ctrl_c_in_the_course_selector_of_a_course_quits(app: App) -> None:
     app.press("c")
     app.wait_for(lambda: app.selecting)
     app.quit()
-    assert termios.tcgetattr(sys.stdin)[3] & termios.ICANON
 
 
 def test_a_course_is_resumed_where_it_was_left(
@@ -622,8 +644,8 @@ def test_exercise_files_are_kept(
 def run_main(
     terminal: _Terminal, monkeypatch: pytest.MonkeyPatch
 ) -> Callable[[], str]:
-    """Runs the ``pyics`` script's ``main`` in the pseudo-terminal until it returns, and
-    returns everything it wrote to stdout. Cancels the course selector once shown."""
+    """Runs the ``pyics`` script's ``main`` in the terminal until it returns, and returns
+    everything it wrote to stdout. Cancels the course selector once shown."""
     monkeypatch.setattr(main, "sys", SimpleNamespace(stdout=terminal.stdout))
     monkeypatch.setattr(main, "setup_logging", lambda *args: None)
 
@@ -633,7 +655,7 @@ def run_main(
             if time.monotonic() > deadline:
                 return
             time.sleep(0.01)
-        os.write(terminal.keyboard, CTRL_C.encode())
+        terminal.keyboard.send_text(CTRL_C)
 
     def run() -> str:
         threading.Thread(target=cancel_course_selector, daemon=True).start()
@@ -651,7 +673,6 @@ def test_main_leaves_the_alternate_screen_once_quit(
     assert "Select Course" in written
     # nothing is drawn once the alternate screen has been left
     assert written.endswith(SHOW_CURSOR + ALT_SCREEN_LEAVE)
-    assert termios.tcgetattr(sys.stdin)[3] & termios.ICANON
 
 
 def test_main_prints_why_it_quits(
