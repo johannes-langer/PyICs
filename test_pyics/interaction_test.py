@@ -24,6 +24,8 @@ from prompt_toolkit.key_binding import KeyPress
 from pyics.app.cli import CLI
 from pyics.app.pyics import PyIC
 from pyics.data import Course, Task
+from pyics.distribution import archive
+from pyics.distribution.sources import Source
 from pyics.scripts import main
 from pyics.tests.tests import PrintTest, SimpleTest, Test
 from pyics.util.terminal import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, SHOW_CURSOR
@@ -572,6 +574,64 @@ def test_a_course_that_cant_be_started_is_reported(
 
     app.select(1)
     app.wait_for(lambda: "2 failed" in app.screen)
+
+
+def test_a_course_that_needs_missing_packages_is_not_started(
+    exercises: tuple[Path, Path], tmp_path: Path, launch: Callable[[], App]
+) -> None:
+    manifest = tmp_path / "course.pyicscourse.json"
+    archive.update_manifest(manifest, {"requires": ["not-a-real-package-xyz"]})
+    app = launch()
+    app.wait_for(lambda: "Needs not-a-real-package-xyz (not installed)." in app.screen)
+    app.press(ENTER)
+    app.wait_for(lambda: app.cli.info_text.startswith("[red]Can't start course"))
+    assert "Install it with: " in app.cli.info_text
+    assert app.selecting and app.pyics.courses == {}
+
+
+@pytest.fixture
+def library(
+    tmp_path: Path,
+    course_writer: Callable[..., Path],
+    publisher: Callable[..., Path],
+    source_adder: Callable[..., Source],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    """The source "lib", with the course "Adding", and an empty working directory.
+    Returns the library's directory."""
+    author = course_writer(tmp_path / "author", metadata={"version": "1.0"})
+    source_adder(publisher(author, tmp_path / "library"), "lib")
+    (tmp_path / "student").mkdir()
+    monkeypatch.chdir(tmp_path / "student")
+    return tmp_path / "library"
+
+
+def test_courses_of_the_sources_are_pulled_once_selected(
+    library: Path, tmp_path: Path, launch: Callable[[], App]
+) -> None:
+    app = launch()
+    app.wait_for(lambda: "❯ Adding (pull from lib)" in app.screen)
+    assert "Version 1.0 in lib, pulled to ./adding once selected." in app.screen
+
+    app.press(ENTER)
+    app.wait_for(lambda: "adds failed: 0 == 3" in app.screen)
+    assert app.cli.info_text == "Implement add(a, b)."
+    assert (tmp_path / "student/adding/.exercises/add.py").is_file()
+
+    # offered as a course in the working directory from now on
+    app.press("c")
+    app.wait_for(lambda: app.selecting and "❯ Adding" in app.screen)
+    assert "pull from" not in app.screen
+
+
+def test_a_course_that_cant_be_pulled_is_reported(
+    library: Path, launch: Callable[[], App]
+) -> None:
+    (library / "adding-1.0.zip").unlink()
+    app = launch()
+    app.select()
+    app.wait_for(lambda: app.cli.info_text.startswith("[red]Can't pull Adding:"))
+    assert app.selecting and "❯ Adding (pull from lib)" in app.screen
 
 
 def test_ctrl_c_in_the_course_selector_quits(

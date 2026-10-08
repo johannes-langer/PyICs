@@ -80,8 +80,7 @@ def _edit_course(course_file: PathLike, max_depth: int = 3) -> None:
     if not course_file.name.endswith(COURSE_SUFFIX):
         sys.exit(f"error: {course_file} is not a course manifest (*{COURSE_SUFFIX})")
     try:
-        with open(course_file, encoding="utf-8") as f:
-            manifest = json.load(f)
+        manifest = json.load_plain(course_file)
         if not isinstance(manifest["tasks"], dict):
             raise TypeError("its tasks are not a mapping of names to task files")
     except Exception as err:  # noqa: BLE001
@@ -121,6 +120,7 @@ def _edit_course(course_file: PathLike, max_depth: int = 3) -> None:
                 task_files,
                 name=fields["name"],
                 progress=[progress.get(paths.absolute(p), 0) for p in task_files],
+                metadata=manifest,  # e.g. its requires, which aren't edited here
             )
             message = f"Course written to {fp}"
             if renamed:

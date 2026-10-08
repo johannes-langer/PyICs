@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from fractions import Fraction
 import os
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from rich.console import Group, RenderableType
 from rich.padding import Padding
@@ -14,10 +14,19 @@ from rich.table import Table
 from rich.text import Text
 
 from pyics.data.task import Task
+from pyics.distribution.dependencies import ModulePolicy, manifest_requirements
 from pyics.util import json_handling as json
 from pyics.util import paths
+from pyics.util.discovery import COURSE_SUFFIX
 from pyics.util.paths import StrPath
 from pyics.util.logging import get_logger
+
+
+# Optional fields of a course manifest, which describe the course when it is distributed
+# (see ``pyics.distribution``): ``slug`` (the name it is pulled by), ``version``,
+# ``description``, ``tags``, the packages it needs besides pyics (``requires``, PEP 508
+# requirements) and the pyics version it needs (``requires_pyics``).
+METADATA_KEYS = ("slug", "version", "description", "tags", "requires", "requires_pyics")
 
 
 def _hints_view(hints: list[str], total: int) -> RenderableType:
@@ -46,6 +55,7 @@ class Course:
         name: str,
         tasks: dict[str, StrPath],
         progress: list[int],
+        requires: Sequence[str] | None = None,
         check_progress: bool = False,
     ) -> None:
         """
@@ -57,6 +67,10 @@ class Course:
             Ordered mapping of task names to task files.
         progress: list[int]
             Progress of each task (1 if solved), in the order of ``tasks``.
+        requires: Sequence[str] | None (optional)
+            The packages the course needs besides pyics, as PEP 508 requirements. Its
+            task files may make json_tricks import only their modules, besides pyics and
+            the standard library (see ``ModulePolicy``).
         check_progress: bool (optional, keyword only)
             If False (default), start right away on the first task that is unsolved
             according to ``progress``. If True, the progress is instead checked from the
@@ -65,6 +79,8 @@ class Course:
         """
         self.name = name
         self.tasks = tasks
+        self.requires = list(requires or [])
+        self.__module_policy = ModulePolicy(self.requires)
         self.__tasks_list = list(self.tasks)
         self.__progress: list[int] = progress
 
@@ -89,7 +105,12 @@ class Course:
         else:
             # when you boot up a course, always show the next unsolved task
             start = self.__progress.index(0) if 0 in self.__progress else -1
-            self.__set_current_task(Task(self.tasks[self.__tasks_list[start]]))
+            self.__set_current_task(self.__load_task(self.__tasks_list[start]))
+
+    def __load_task(self, name: str, *, setup: bool = True) -> Task:
+        """Load the task ``name`` of the course, which may only name the modules the
+        course declares for json_tricks to import."""
+        return Task(self.tasks[name], setup=setup, module_policy=self.__module_policy)
 
     def __set_current_task(self, task: Task) -> None:
         self.__current_task = task
@@ -108,7 +129,7 @@ class Course:
                 break
             self.__checking = i
             try:
-                last = Task(self.tasks[name], setup=False)
+                last = self.__load_task(name, setup=False)
                 solved = last.check_solved()
             except Exception as err:  # noqa: BLE001
                 get_logger(__name__).warning(
@@ -277,7 +298,7 @@ class Course:
 
             if current_task_number + 1 < len(self.__tasks_list):
                 self.__set_current_task(
-                    Task(self.tasks[self.__tasks_list[current_task_number + 1]])
+                    self.__load_task(self.__tasks_list[current_task_number + 1])
                 )
 
         return self.__current_task
@@ -299,7 +320,7 @@ class Course:
 
         if current_task_number != 0:
             self.__set_current_task(
-                Task(self.tasks[self.__tasks_list[current_task_number - 1]])
+                self.__load_task(self.__tasks_list[current_task_number - 1])
             )
 
         return self.__current_task
@@ -375,13 +396,22 @@ class Course:
         Course
             The Course object represented in the manifest
         """
-        with open(fp, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        # a manifest holds plain data only, so reading it never imports a module
+        data = json.load_plain(fp)
 
         base = Path(fp).parent
-        data["tasks"] = {k: paths.resolve(v, base) for k, v in data["tasks"].items()}
+        tasks = {k: paths.resolve(v, base) for k, v in data["tasks"].items()}
+        progress = list(data.get("progress") or [])[: len(tasks)]
+        progress += [0] * (len(tasks) - len(progress))
+        requires, _ = manifest_requirements(data)
 
-        return cls(**data, check_progress=check_progress)
+        return cls(
+            name=data.get("name") or Path(fp).name.removesuffix(COURSE_SUFFIX),
+            tasks=tasks,
+            progress=progress,
+            requires=requires,
+            check_progress=check_progress,
+        )
 
     @staticmethod
     def create_course_manifest(
@@ -391,6 +421,7 @@ class Course:
         name: Optional[str] = None,
         use_task_names: bool = True,
         progress: Optional[list[int]] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
     ) -> Path:
         """
         Compose a course manifest from the provided ``task_files``. A course manifest is
@@ -416,6 +447,9 @@ class Course:
         progress: list[int] | None (optional, keyword only)
             Progress of each task, in the order of ``task_files``. Default is None, i.e.
             no task solved yet.
+        metadata: Mapping[str, Any] | None (optional, keyword only)
+            The course's optional fields (see ``METADATA_KEYS``), e.g. those of the
+            manifest that is rewritten. Other keys are ignored.
 
         Returns
         -------
@@ -448,9 +482,7 @@ class Course:
         if use_task_names:
 
             def get_task_name(fp: StrPath) -> str:
-                with open(fp, "r", encoding="utf-8") as f:
-                    name = json.load(f)["name"]
-                return name
+                return json.load_plain(fp)["name"]
 
             keys = map(get_task_name, task_files)
 
@@ -471,6 +503,9 @@ class Course:
                 f"got progress for {len(progress)} tasks, but {len(task_files)} tasks"
             )
         manifest["progress"] = list(progress)
+        for key in METADATA_KEYS:
+            if metadata and metadata.get(key) is not None:
+                manifest[key] = metadata[key]
 
         # serialized before the file is opened, so a manifest that is being edited isn't
         # left empty if serializing fails

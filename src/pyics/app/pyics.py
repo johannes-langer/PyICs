@@ -1,8 +1,11 @@
 from collections import Counter
+from dataclasses import dataclass, field
+import json
 from pathlib import Path
 import queue
 import threading
 import time
+from collections.abc import Iterable
 from typing import Any
 
 from rich.markup import escape
@@ -25,6 +28,11 @@ from pyics.app.key_listener import hey_listen
 from pyics.app.prompts import PromptBack, PromptCancelled, SelectInput
 from pyics.data import Course
 from pyics.data.task import wait_for_test_runs
+from pyics.distribution import dependencies, sources
+from pyics.distribution.archive import ORIGIN_FILE, ArchiveError
+from pyics.distribution.dependencies import Problem
+from pyics.distribution.pull import PullError, pull
+from pyics.distribution.sources import CourseEntry, Source
 from pyics.util import paths
 from pyics.util.discovery import COURSE_SUFFIX, find_courses
 
@@ -32,6 +40,32 @@ _SELECT_INFO = "Select a course..."
 # how long to wait on shutdown for test runs to finish, which restore the terminal mode
 # they started in
 _SHUTDOWN_TIMEOUT = 5  # seconds
+
+
+@dataclass(frozen=True)
+class _LocalCourse:
+    """A course in the working directory, as offered in the course selector."""
+
+    path: Path
+    # its requirements that aren't met, which keep it from being started
+    problems: list[Problem] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _SourceCourse:
+    """A course in one of the sources, offered in the course selector to be pulled."""
+
+    source: Source
+    entry: CourseEntry
+
+
+def _cant_start(name: str, problems: list[Problem]) -> str:
+    """Why the course ``name`` can't be started, as markup for the info bar."""
+    return (
+        f"[red]Can't start {escape(name)}:[/red] it needs "
+        f"{escape(dependencies.describe(problems))}. "
+        f"{escape(dependencies.install_hint(problems))}"
+    )
 
 
 class PyIC:
@@ -74,32 +108,108 @@ class PyIC:
         self._register_actions()
         self.cli.update_hotkeys({a.ref: a.name for a in self.key_actions.values()})
 
-    def _find_courses(self) -> dict[str, Path]:
+    def _find_courses(self) -> dict[str, _LocalCourse]:
         """
         Find the courses in the working directory (see ``max_depth``), skipping
         manifests that can't be read or have no tasks.
 
         Returns
         -------
-        dict[str, Path]
-            The course manifests, ordered by path, by their labels in the course
-            selector: their course names, followed by their paths if names are taken
-            several times.
+        dict[str, _LocalCourse]
+            The courses, ordered by path, by their labels in the course selector: their
+            course names, followed by their paths if names are taken several times.
         """
-        entries: list[tuple[str, Path]] = []
+        entries: list[tuple[str, _LocalCourse]] = []
         for path, manifest in sorted(find_courses(self.cwd, self.max_depth).items()):
             if not manifest["tasks"]:
                 continue
             name = manifest.get("name")
             if not isinstance(name, str) or not name:
                 name = path.name.removesuffix(COURSE_SUFFIX)
-            entries.append((name, path))
+            problems = dependencies.check_manifest(manifest)
+            entries.append((name, _LocalCourse(path, problems)))
 
         counts = Counter(name for name, _ in entries)
         return {
-            f"{name} ({self._display_path(path)})" if counts[name] > 1 else name: path
-            for name, path in entries
+            f"{name} ({self._display_path(c.path)})" if counts[name] > 1 else name: c
+            for name, c in entries
         }
+
+    def _pulled_courses(self, local: Iterable[_LocalCourse]) -> set[tuple[str, str]]:
+        """The sources and slugs of the ``local`` courses that were pulled from a
+        source (see ``pyics.distribution.pull``)."""
+        pulled: set[tuple[str, str]] = set()
+        for course in local:
+            for directory in course.path.parents:
+                if not directory.is_relative_to(self.cwd):
+                    break
+                try:
+                    origin = json.loads(
+                        (directory / ORIGIN_FILE).read_text(encoding="utf-8")
+                    )
+                except (OSError, ValueError):
+                    continue
+                if isinstance(origin, dict):
+                    pulled.add((str(origin.get("source")), str(origin.get("slug"))))
+                break
+        return pulled
+
+    def _find_source_courses(
+        self, local: dict[str, _LocalCourse]
+    ) -> dict[str, _SourceCourse]:
+        """
+        The courses in the sources that haven't been pulled to the working directory,
+        as known from their indexes as they were fetched last, so that showing them
+        needs no connection.
+
+        Returns
+        -------
+        dict[str, _SourceCourse]
+            The courses by their labels in the course selector: their titles, followed
+            by their sources.
+        """
+        pulled = self._pulled_courses(local.values())
+        found: dict[str, _SourceCourse] = {}
+        for source, entry in sources.cached_courses():
+            if (source.name, entry.slug) in pulled or (self.cwd / entry.slug).exists():
+                continue
+            label = f"{entry.title} (pull from {source.name})"
+            if label in local or label in found:
+                label = f"{entry.title} (pull {source.name}/{entry.slug})"
+            found[label] = _SourceCourse(source, entry)
+        return found
+
+    def _source_course_hint(self, course: _SourceCourse) -> str:
+        entry = course.entry
+        lines = [entry.description] if entry.description else []
+        version = f" {entry.version}" if entry.version else ""
+        lines.append(
+            f"Version{version} in {course.source.name}, pulled to ./{entry.slug} once "
+            "selected."
+        )
+        if problems := dependencies.check(entry.requires, entry.requires_pyics):
+            lines.append(f"Needs {dependencies.describe(problems)}.")
+        return "\n".join(lines)
+
+    def _pull_course(self, course: _SourceCourse) -> Path | None:
+        """
+        Pull ``course`` to the working directory, showing its progress in the info
+        bar. Returns its manifest if it can be started, or None if it can't, with the
+        reason why shown in the info bar.
+        """
+        entry = course.entry
+        self.cli.update_info(f"Pulling {escape(entry.title)} from {course.source.name}...")
+        try:
+            pulled = pull(f"{course.source.name}/{entry.slug}", cwd=self.cwd)
+        except (PullError, ArchiveError, OSError) as err:
+            self.cli.update_info(
+                f"[red]Can't pull {escape(entry.title)}:[/red] {escape(str(err))}"
+            )
+            return None
+        if pulled.problems:
+            self.cli.update_info(_cant_start(pulled.info.title, pulled.problems))
+            return None
+        return paths.absolute(pulled.manifest_path)
 
     def _display_path(self, path: Path) -> str:
         return paths.relative_to(path, self.cwd).as_posix()
@@ -116,7 +226,8 @@ class PyIC:
             The queue which collects key presses
         """
         courses = self._find_courses()
-        if not courses:
+        source_courses = self._find_source_courses(courses)
+        if not courses and not source_courses:
             self.exit_message = (
                 f"No course found in {self.cwd} "
                 f"(searched {self.max_depth} directories deep)."
@@ -125,14 +236,19 @@ class PyIC:
             return
 
         hints = {}
-        for label, path in courses.items():
-            hints[label] = self._display_path(path)
-            if (course := self.courses.get(path)) is not None:
+        for label, local in courses.items():
+            hints[label] = self._display_path(local.path)
+            if (course := self.courses.get(local.path)) is not None:
                 hints[label] += f"\n{float(course.progress):.0%} solved"
-        prompt = SelectInput("Select Course", list(courses), hints=hints)
+            if local.problems:
+                hints[label] += f"\nNeeds {dependencies.describe(local.problems)}."
+        for label, source_course in source_courses.items():
+            hints[label] = self._source_course_hint(source_course)
+        options = [*courses, *source_courses]
+        prompt = SelectInput("Select Course", options, hints=hints)
         previous = self.__previous_course
-        for label, path in courses.items():
-            if previous is not None and self.courses.get(path) is previous:
+        for label, local in courses.items():
+            if previous is not None and self.courses.get(local.path) is previous:
                 prompt.set_answer(label)
 
         self.cli.update_info(self.__select_info)
@@ -148,7 +264,19 @@ class PyIC:
                 self.running = False
                 return
 
-            path = courses[label]
+            if label in source_courses:
+                pulled = self._pull_course(source_courses[label])
+                if pulled is None:
+                    # offered again as a course in the working directory, if it was
+                    # pulled
+                    self.__select_info = self.cli.info_text
+                    return
+                path = pulled
+            elif courses[label].problems:
+                self.cli.update_info(_cant_start(label, courses[label].problems))
+                continue
+            else:
+                path = courses[label].path
             if (course := self.courses.get(path)) is None:
                 try:
                     course = Course.load_course_manifest(path, check_progress=True)

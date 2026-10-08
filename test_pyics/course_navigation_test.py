@@ -29,7 +29,7 @@ class _FakeTask:
     # called by ``check_solved`` before it returns, e.g. to block
     on_check: ClassVar[staticmethod[[Path], object]] = staticmethod(lambda path: None)
 
-    def __init__(self, path: Path, *, setup: bool = True) -> None:
+    def __init__(self, path: Path, *, setup: bool = True, module_policy=None) -> None:
         self.path = path
         self.is_set_up = setup
         self.help = ["first", "second"]
@@ -245,7 +245,7 @@ def test_a_task_that_cant_be_loaded_is_reported(
     checked: Callable[[list[int]], Course],
 ) -> None:
     monkeypatch.chdir(tmp_path)  # where the warning is logged to
-    def broken(path: Path, *, setup: bool = True) -> _FakeTask:
+    def broken(path: Path, *, setup: bool = True, module_policy=None) -> _FakeTask:
         raise FileNotFoundError(path)
 
     monkeypatch.setattr("pyics.data.course.Task", broken)
