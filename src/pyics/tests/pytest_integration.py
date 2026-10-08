@@ -1,12 +1,30 @@
+import dataclasses
 from os import PathLike
 from typing import Literal
 
 import pytest
 from pytest import TestReport
 from _pytest._code.code import TerminalRepr
+from _pytest._io import TerminalWriter
 from _pytest.nodes import Node
+from rich.errors import MarkupError
+from rich.text import Text
 
 from pyics.tests import Test
+from pyics.tests.tests import MarkupAssertionError
+
+
+@dataclasses.dataclass(eq=False)
+class RichFailureRepr(TerminalRepr):
+    """
+    Failure representation of a ``PyicsItem``, keeping the highlighting of its message
+    for the main panel. Elsewhere, e.g. in ``TestReport.longreprtext``, it is plain text.
+    """
+
+    text: Text
+
+    def toterminal(self, tw: TerminalWriter) -> None:
+        tw.line(self.text.plain)
 
 
 class PyicsItem(pytest.Item):
@@ -34,7 +52,13 @@ class PyicsItem(pytest.Item):
         | Literal["value"]
         | Literal["auto"] = None,
     ) -> str | TerminalRepr:
-        return f"{self.name} failed: {excinfo.value}"
+        message = Text(str(excinfo.value))
+        if isinstance(excinfo.value, MarkupAssertionError):
+            try:
+                message = Text.from_markup(str(excinfo.value), emoji=False)
+            except MarkupError:
+                pass  # shown as it is, rather than failing the whole run
+        return RichFailureRepr(Text.assemble(f"{self.name} failed: ", message))
 
     def reportinfo(self) -> tuple[PathLike | str, int | None, str]:
         return self.path, 0, f"pyics test: {self.name}"

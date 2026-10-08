@@ -17,7 +17,7 @@ import pyics.util.json_handling as json
 from pyics.util import paths, terminal
 from pyics.util.logging import get_logger
 from pyics.tests import Test
-from pyics.tests.pytest_integration import LiveTestCollectionPlugin
+from pyics.tests.pytest_integration import LiveTestCollectionPlugin, RichFailureRepr
 
 # pytest runs aren't thread-safe (e.g. the tests import the exercise file as the module
 # ``current_solution``), so all tasks' runs are serialized
@@ -32,6 +32,13 @@ def wait_for_test_runs(timeout: float = -1) -> None:
     """
     if _pytest_lock.acquire(timeout=timeout):
         _pytest_lock.release()
+
+
+def _failure_text(report: pytest.TestReport) -> Text:
+    """The failure message of ``report``, highlighted if it comes from a ``PyicsItem``"""
+    if isinstance(report.longrepr, RichFailureRepr):
+        return report.longrepr.text
+    return Text(report.longreprtext)
 
 
 class Task:
@@ -186,6 +193,8 @@ class Task:
         sections: list[RenderableType] = [summary]
 
         if failed_reports:
+            failures = [(r.nodeid, _failure_text(r)) for r in failed_reports]
+
             # one rule + traceback per failure, mirroring pytest's own failure sections
             sections.append(
                 Padding(Rule("[white]FAILURES[/]", style="white"), pad=(1, 0, 0, 0))
@@ -193,12 +202,12 @@ class Task:
             sections += [
                 Group(
                     Padding(
-                        Rule(f"[bold bright_red]{r.nodeid}[/]", style="bright_red"),
+                        Rule(Text(nodeid, style="bold bright_red"), style="bright_red"),
                         pad=(1, 0, 0, 0),
                     ),
-                    Text(r.longreprtext, style="red"),
+                    Text.assemble(text, style="red"),
                 )
-                for r in failed_reports
+                for nodeid, text in failures
             ]
 
             # pytest's "short test summary info", one line per failed test
@@ -209,11 +218,12 @@ class Task:
                 )
             )
             sections += [
-                Text(
-                    f"FAILED {r.nodeid} - {' '.join(r.longreprtext.splitlines())}",
+                Text.assemble(
+                    f"FAILED {nodeid} - ",
+                    Text(" ").join(text.split()),
                     style="bright_red",
                 )
-                for r in failed_reports
+                for nodeid, text in failures
             ]
 
         if relevant_reports:
