@@ -13,15 +13,13 @@ from pyics.app.prompts import PromptCancelled, PromptSession
 from pyics.data.course import Course
 from pyics.data.task import Task
 from pyics.scripts.create_course import (
-    _COURSE_SUFFIX,
     _course_flow,
     _CourseTask,
-    _find_courses,
-    _find_task_files,
     _names_taken_elsewhere,
     _rename_in_courses,
 )
 from pyics.util import paths
+from pyics.util.discovery import COURSE_SUFFIX, find_courses, find_task_files
 
 
 def _read_course(
@@ -32,7 +30,7 @@ def _read_course(
     """
     Read the course ``manifest`` (read from ``fp``) and its tasks' task files for
     ``_course_flow``. The tasks can't be renamed to the names of the other tasks in the
-    other ``courses`` (see ``_find_courses``) that include them.
+    other ``courses`` (see ``find_courses``) that include them.
 
     Returns
     -------
@@ -78,8 +76,8 @@ def _edit_course(course_file: PathLike, max_depth: int = 3) -> None:
         directory.
     """
     course_file = Path(course_file)
-    if not course_file.name.endswith(_COURSE_SUFFIX):
-        sys.exit(f"error: {course_file} is not a course manifest (*{_COURSE_SUFFIX})")
+    if not course_file.name.endswith(COURSE_SUFFIX):
+        sys.exit(f"error: {course_file} is not a course manifest (*{COURSE_SUFFIX})")
     try:
         with open(course_file, encoding="utf-8") as f:
             manifest = json.load(f)
@@ -97,8 +95,8 @@ def _edit_course(course_file: PathLike, max_depth: int = 3) -> None:
 
     try:
         # searched once up front, since the flow is replayed whenever the user goes back
-        found = _find_task_files(Path.cwd(), max_depth)
-        courses = _find_courses(Path.cwd(), max_depth)
+        found = find_task_files(Path.cwd(), max_depth)
+        courses = find_courses(Path.cwd(), max_depth)
         courses.pop(paths.absolute(course_file), None)  # rewritten as a whole
         current, progress = _read_course(course_file, manifest, courses)
         info = f"Editing the course {escape(str(current['name']))}..."

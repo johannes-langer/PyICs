@@ -1,4 +1,4 @@
-import itertools
+from collections import Counter
 from pathlib import Path
 import queue
 import threading
@@ -9,10 +9,27 @@ from rich.markup import escape
 from rich.text import Text
 
 
-from pyics.app.actions import KeyAction, Next, Previous, Quit, ScrollDown, ScrollUp
+from pyics.app.actions import (
+    Courses,
+    KeyAction,
+    Next,
+    Previous,
+    Quit,
+    ScrollDown,
+    ScrollUp,
+)
 from pyics.app.cli import CLI
 from pyics.app.key_listener import hey_listen
-from pyics.data import Task, Course
+from pyics.app.prompts import PromptBack, PromptCancelled, SelectInput
+from pyics.data import Course
+from pyics.data.task import wait_for_test_runs
+from pyics.util import paths
+from pyics.util.discovery import COURSE_SUFFIX, find_courses
+
+_SELECT_INFO = "Select a course..."
+# how long to wait on shutdown for test runs to finish, which restore the terminal mode
+# they started in
+_SHUTDOWN_TIMEOUT = 5  # seconds
 
 
 class PyIC:
@@ -20,36 +37,138 @@ class PyIC:
 
     __current_course: Course | None
 
-    def __init__(self, cli: CLI):
+    def __init__(self, cli: CLI, *, max_depth: int = 2):
+        """
+        Parameters
+        ----------
+        cli: CLI
+            The CLI to draw to.
+        max_depth: int (optional, keyword only)
+            Set the maximum depth to walk the working directory for courses. For example,
+            with the default value (2), ``./subdir/subsubdir/c.pyicscourse.json`` is
+            found, but not ``./subdir/subsubdir/subsubsubdir/c.pyicscourse.json``.
+        """
         self.cwd = Path.cwd()
         self.cli = cli
+        self.max_depth = max_depth
         self.running = False
         self.key_actions: dict[str, KeyAction] = {}
         self.__current_course: Course | None = None
+        # the course that was left for the course selector, to go back to
+        self.__previous_course: Course | None = None
+        # the courses loaded in this session, by manifest path, so that a course that is
+        # left and selected again resumes where it was left
+        self.courses: dict[Path, Course] = {}
+        # set once the current course is entered, to draw it as a whole
+        self.__entered = False
+        self.__shown_check_status = ""
+        # shown in the header the next time the course selector is
+        self.__select_info = _SELECT_INFO
+        # printed once the interface has been left (see ``scripts.main``)
+        self.exit_message: str | None = None
 
         self._register_actions()
         self.cli.update_hotkeys({a.ref: a.name for a in self.key_actions.values()})
 
-    def _find_course(self, max_depth: int = 2) -> None:
-        """TODO: This is indev behavior. In the future, there should be a course selector
-        if the application is not called with a specific course selected
+    def _find_courses(self) -> dict[str, Path]:
+        """
+        Find the courses in the working directory (see ``max_depth``), skipping
+        manifests that can't be read or have no tasks.
 
-        Search the current working directory for course json files (expecting only one)
-        and select it.
+        Returns
+        -------
+        dict[str, Path]
+            The course manifests, ordered by path, by their labels in the course
+            selector: their course names, followed by their paths if names are taken
+            several times.
+        """
+        entries: list[tuple[str, Path]] = []
+        for path, manifest in sorted(find_courses(self.cwd, self.max_depth).items()):
+            if not manifest["tasks"]:
+                continue
+            name = manifest.get("name")
+            if not isinstance(name, str) or not name:
+                name = path.name.removesuffix(COURSE_SUFFIX)
+            entries.append((name, path))
+
+        counts = Counter(name for name, _ in entries)
+        return {
+            f"{name} ({self._display_path(path)})" if counts[name] > 1 else name: path
+            for name, path in entries
+        }
+
+    def _display_path(self, path: Path) -> str:
+        return paths.relative_to(path, self.cwd).as_posix()
+
+    def _select_course(self, q: queue.Queue[str]) -> None:
+        """
+        Let the user select a course in the working directory and enter it. Cancelling
+        (ctrl-c) quits, and going back (esc) returns to the course that was left for the
+        selector, if any. Quits with an ``exit_message`` if there is no course.
 
         Parameters
         ----------
-        max_depth: int (optional)
-            Set the maximum depth to walk the directory. For example, with the default
-            value (2), this method would find ``./subdir/subsubdir/task.json``, but not
-            ``./subdir/subsubdir/subsubsubdir/task.json``.
+        q: queue.Queue[str]
+            The queue which collects key presses
         """
-        globs = [
-            self.cwd.glob(f"{'*/' * d}*.pyicscourse.json") for d in range(max_depth + 1)
-        ]
-        self.__current_course = Course.load_course_manifest(
-            sorted(itertools.chain(*globs))[0]
-        )
+        courses = self._find_courses()
+        if not courses:
+            self.exit_message = (
+                f"No course found in {self.cwd} "
+                f"(searched {self.max_depth} directories deep)."
+            )
+            self.running = False
+            return
+
+        hints = {}
+        for label, path in courses.items():
+            hints[label] = self._display_path(path)
+            if (course := self.courses.get(path)) is not None:
+                hints[label] += f"\n{float(course.progress):.0%} solved"
+        prompt = SelectInput("Select Course", list(courses), hints=hints)
+        previous = self.__previous_course
+        for label, path in courses.items():
+            if previous is not None and self.courses.get(path) is previous:
+                prompt.set_answer(label)
+
+        self.cli.update_info(self.__select_info)
+        self.__select_info = _SELECT_INFO
+        while True:
+            try:
+                label = prompt.run(self.cli, q, allow_back=previous is not None)
+            except PromptBack:
+                assert previous is not None
+                self._enter_course(previous)
+                return
+            except PromptCancelled:
+                self.running = False
+                return
+
+            path = courses[label]
+            if (course := self.courses.get(path)) is None:
+                try:
+                    course = Course.load_course_manifest(path, check_progress=True)
+                except Exception as err:  # noqa: BLE001
+                    self.cli.update_info(
+                        f"[red]{type(err).__name__}:[/red] {escape(str(err))}"
+                    )
+                    continue
+                self.courses[path] = course
+            self._enter_course(course)
+            return
+
+    def _enter_course(self, course: Course) -> None:
+        """Make ``course`` the current course, to be drawn as a whole."""
+        self.__current_course = course
+        self.__previous_course = None
+        self.__entered = True
+
+    def leave_course(self) -> None:
+        """Leave the current course for the course selector. The course keeps its
+        state, and is resumed if it is selected again."""
+        if self.__current_course is not None:
+            self.__previous_course = self.__current_course
+            self.__current_course = None
 
     def _register_actions(self) -> None:
         """ """
@@ -57,6 +176,7 @@ class PyIC:
             Quit(cli=self.cli, pyics=self),
             Next(pyics=self),
             Previous(pyics=self),
+            Courses(pyics=self),
             ScrollUp(cli=self.cli, pyics=self),
             ScrollDown(cli=self.cli, pyics=self),
         ]
@@ -86,33 +206,67 @@ class PyIC:
     def run(self, q: queue.Queue[str]):
         """ """
         self.cli()
-        self._find_course()
 
-        while self.running:
-            self.check_keypress(q)
-            if self.current_course is not None:
-                new_test_results, new_progress = self.current_course.tick()
-                task_changed = self.current_course.task_changed
-                if task_changed:
-                    self.current_course.clear_task_changed()
-                    self.cli.update_info(escape(self.current_course.instructions))
-                if new_test_results or task_changed:
-                    # clear before reading the status, so results that arrive in between
-                    # are picked up on the next tick instead of being dropped
-                    self.current_course.clear_test_results()
-                    self.cli.update_main_content(
-                        self.current_course.status,
-                        Text(
-                            ", ".join(
-                                p.as_posix() for p in self.current_course.exercise_files
-                            ),
-                            style="dim",
-                        ),
-                    )
-                if new_progress:
-                    self.cli.update_progress(float(self.current_course.progress))
+        try:
+            while self.running:
+                if self.current_course is None:
+                    self._select_course(q)
+                    continue
 
-            time.sleep(0.05)
+                self.check_keypress(q)
+                if self.current_course is not None:
+                    self._update_course(self.current_course)
+
+                time.sleep(0.05)
+        finally:
+            self.running = False
+            for course in self.courses.values():
+                course.stop_progress_check(_SHUTDOWN_TIMEOUT)
+            # the key listener restores the terminal mode once this returns
+            wait_for_test_runs(_SHUTDOWN_TIMEOUT)
+            self.cli.stop()
+
+    def _update_course(self, course: Course) -> None:
+        """
+        Tick the current ``course`` and draw what has changed, or all of it if it has
+        just been entered.
+        """
+        entered, self.__entered = self.__entered, False
+
+        if course.error is not None:
+            # it can't be started, so it isn't resumed either
+            self.courses = {p: c for p, c in self.courses.items() if c is not course}
+            self.__current_course = None
+            self.__select_info = (
+                f"[red]Can't start {escape(course.name)}:[/red] "
+                f"{escape(str(course.error))}"
+            )
+            return
+
+        new_test_results, new_progress = course.tick()
+        task_changed = course.task_changed
+        if task_changed:
+            course.clear_task_changed()
+
+        if task_changed or entered:
+            info = course.name if course.loading else course.instructions
+            self.cli.update_info(escape(info))
+
+        if course.loading:
+            if entered or course.check_status != self.__shown_check_status:
+                self.__shown_check_status = course.check_status
+                self.cli.update_main_content(course.status)
+        elif new_test_results or task_changed or entered:
+            # clear before reading the status, so results that arrive in between
+            # are picked up on the next tick instead of being dropped
+            course.clear_test_results()
+            self.cli.update_main_content(
+                course.status,
+                Text(", ".join(p.as_posix() for p in course.exercise_files), style="dim"),
+            )
+
+        if new_progress or entered:
+            self.cli.update_progress(float(course.progress))
 
     def check_keypress(self, q: queue.Queue[str]) -> None:
         """

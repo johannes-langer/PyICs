@@ -20,12 +20,12 @@ from pyics.data import Course, Task
 from pyics.scripts import edit_course
 from pyics.scripts.create_course import (
     _course_flow,
-    _find_courses,
     _names_taken_elsewhere,
     _rename_in_courses,
 )
 from pyics.scripts.create_task import _TEST_TYPES
 from pyics.scripts.edit_course import _read_course
+from pyics.util.discovery import find_courses
 
 UP, DOWN, ENTER, BACKSPACE, SPACE = "UP", "DOWN", "\r", "\x7f", " "
 CTRL_C, CTRL_D = "\x03", "\x04"
@@ -152,7 +152,7 @@ def test_find_courses_skips_unusable_files(
     Path("odd.pyicscourse.json").write_text(json.dumps({"tasks": {"A": 1}}))
     Path(".venv").mkdir()
     Path(".venv/v.pyicscourse.json").write_text(json.dumps({"tasks": {}}))
-    assert list(_find_courses(tmp_path, 3)) == [tmp_path / "sub/c.pyicscourse.json"]
+    assert list(find_courses(tmp_path, 3)) == [tmp_path / "sub/c.pyicscourse.json"]
 
 
 def test_rename_in_courses(tmp_path: Path) -> None:
@@ -164,7 +164,7 @@ def test_rename_in_courses(tmp_path: Path) -> None:
         "progress": [1, 0],
     }
     fp.write_text(json.dumps(manifest))
-    courses = _find_courses(tmp_path, 3)
+    courses = find_courses(tmp_path, 3)
 
     task_file = tmp_path / "a.pyicstask.json"
     assert _names_taken_elsewhere(task_file, courses) == {"X"}
@@ -205,7 +205,7 @@ def test_rename_to_a_name_in_the_course_is_rejected(course_file: Path) -> None:
 def test_rename_to_a_name_in_another_course_is_rejected(course_file: Path) -> None:
     x = _task("X")
     Course.create_course_manifest(Path("o.pyicscourse.json"), [x, A])
-    courses = _find_courses(Path.cwd(), 3)
+    courses = find_courses(Path.cwd(), 3)
     del courses[course_file.absolute()]  # like edit_course
     fields, s = _edit(
         [

@@ -21,6 +21,20 @@ from pyics.util.logging import get_logger
 from pyics.tests import Test
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin
 
+# pytest runs aren't thread-safe (e.g. the tests import the exercise file as the module
+# ``current_solution``), so all tasks' runs are serialized
+_pytest_lock = threading.Lock()
+
+
+def wait_for_test_runs(timeout: float = -1) -> None:
+    """
+    Wait until no task's tests are being run (at most ``timeout`` seconds, if given).
+    A run restores the terminal mode it started in, so e.g. the terminal mode must not be
+    changed back to cooked before a run started in raw mode has finished.
+    """
+    if _pytest_lock.acquire(timeout=timeout):
+        _pytest_lock.release()
+
 
 class Task:
     """Unified Task Representation"""
@@ -30,7 +44,7 @@ class Task:
     __solved: bool = False
     __new_test_results: bool = False
 
-    def __init__(self, task_file: PathLike):
+    def __init__(self, task_file: PathLike, *, setup: bool = True):
         """
         Parses a task from a task json-file.
 
@@ -41,6 +55,10 @@ class Task:
         ----------
         task_file: PathLike
             Path to the task file
+        setup: bool (optional, keyword only)
+            Create the task's files and run its tests (see ``setup``). Default is True.
+            If False, the task can only be checked (see ``check_solved``) until ``setup``
+            is called.
         """
         self.__path = task_file
         with open(task_file, "r", encoding="utf-8") as f:
@@ -58,25 +76,65 @@ class Task:
             paths.resolve(fp, base) for fp in raw_json.get("sol_files", [])
         ]
 
-        # The solution and exercise code does not need to be in memory
-        self.create_files(raw_json["exercise_code"], raw_json["solution_code"])
+        # kept until the files are created; the code does not need to be in memory after
+        self.__code: tuple[list[str], list[str]] | None = (
+            raw_json["exercise_code"],
+            raw_json["solution_code"],
+        )
 
         self.tests: list[Test] = raw_json["tests"]
         for test in self.tests:
             test.file_path = paths.resolve(test.file_path, base)
 
-        self.last_mtimes = {
-            f: os.path.getmtime(f) for f in self.exercise_files if os.path.exists(f)
-        }
-
         self.__info = self.instructions
         self.__status = Text("tests pending...", style="dim")
         self.test_results: list[pytest.TestReport] = []
+        self.__tested = False
 
         self._tests_lock = threading.Lock()
         self._tests_pending = False
 
-        self.run_tests()
+        self.last_mtimes: dict[Path, float] = {}
+        if setup:
+            self.setup()
+
+    def setup(self) -> None:
+        """
+        Create the task's files (keeping existing exercise files, see ``create_files``)
+        and run its tests, unless they have already been run by ``check_solved``. Only
+        does something the first time it is called.
+        """
+        if self.__code is None:
+            return
+        self.create_files(*self.__code)
+        self.__code = None
+
+        # files checked by check_solved keep the time they were checked at, so changes
+        # made since are still picked up
+        self.last_mtimes = {
+            f: self.last_mtimes.get(f, os.path.getmtime(f))
+            for f in self.exercise_files
+            if os.path.exists(f)
+        }
+        if not self.__tested:
+            self.run_tests()
+
+    def check_solved(self) -> bool:
+        """
+        Run the tests synchronously and return whether the task is solved, without
+        creating any files. A task whose exercise files don't all exist is unsolved, and
+        its tests aren't run.
+        """
+        if not all(os.path.exists(f) for f in self.exercise_files):
+            return False
+
+        mtimes = {f: os.path.getmtime(f) for f in self.exercise_files}
+        with self._tests_lock:
+            self._tests_pending = True
+            self.__run_tests_locked()
+        # changes made from here on are picked up by check_file_changes
+        self.last_mtimes = mtimes
+        return self.solved
 
     @property
     def new_test_results(self) -> bool:
@@ -235,10 +293,17 @@ class Task:
         reports in self.test_results.
         """
         try:
-            while self._tests_pending:
-                self._tests_pending = False
-                plugin = LiveTestCollectionPlugin(self.tests)
+            self.__run_tests_locked()
+        finally:
+            self._tests_lock.release()
 
+    def __run_tests_locked(self) -> None:
+        """Run the tests while they are pending. ``self._tests_lock`` must be held."""
+        while self._tests_pending:
+            self._tests_pending = False
+            plugin = LiveTestCollectionPlugin(self.tests)
+
+            with _pytest_lock:
                 try:
                     tty_attrs = termios.tcgetattr(sys.stdin.fileno())
                 except termios.error, ValueError:
@@ -255,18 +320,17 @@ class Task:
                         except termios.error:
                             pass
 
-                self.test_results = plugin.reports
+            self.test_results = plugin.reports
+            self.__tested = True
 
-                # log reports
-                logger = get_logger(__name__)
-                for rep in self.test_results:
-                    logger.debug(f"{rep.nodeid} {rep.when} {rep.outcome}")
-                    logger.debug(rep.longreprtext)
+            # log reports
+            logger = get_logger(__name__)
+            for rep in self.test_results:
+                logger.debug(f"{rep.nodeid} {rep.when} {rep.outcome}")
+                logger.debug(rep.longreprtext)
 
-                self.update_status()
-                self.__new_test_results = True
-        finally:
-            self._tests_lock.release()
+            self.update_status()
+            self.__new_test_results = True
 
     def create_files(
         self,

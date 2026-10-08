@@ -11,8 +11,9 @@ import pytest
 
 import pyics.util.json_handling as json
 from pyics.app.prompts import PromptCancelled, PromptSession, ReorderInput
-from pyics.scripts.create_course import _check_path, _course_flow, _find_task_files
+from pyics.scripts.create_course import _check_path, _course_flow
 from pyics.scripts.create_task import _TEST_TYPES
+from pyics.util.discovery import find_task_files
 
 UP, DOWN, ENTER, ESC, SPACE, CTRL_C = "UP", "DOWN", "\r", "\x1b", " ", "\x03"
 
@@ -50,12 +51,12 @@ def test_find_respects_max_depth(tmp_path: Path) -> None:
     _task_file(tmp_path / "a.pyicstask.json", "A")
     _task_file(tmp_path / "d1" / "b.pyicstask.json", "B")
     _task_file(tmp_path / "d1" / "d2" / "c.pyicstask.json", "C")
-    assert _find_task_files(tmp_path, 1) == {
+    assert find_task_files(tmp_path, 1) == {
         Path("a.pyicstask.json"): "A",
         Path("d1/b.pyicstask.json"): "B",
     }
-    assert len(_find_task_files(tmp_path, 2)) == 3
-    assert _find_task_files(tmp_path, 0) == {Path("a.pyicstask.json"): "A"}
+    assert len(find_task_files(tmp_path, 2)) == 3
+    assert find_task_files(tmp_path, 0) == {Path("a.pyicstask.json"): "A"}
 
 
 def test_find_skips_dirs_and_unreadable_files(tmp_path: Path) -> None:
@@ -64,7 +65,7 @@ def test_find_skips_dirs_and_unreadable_files(tmp_path: Path) -> None:
     _task_file(tmp_path / "c.json", "C")  # not a task file
     (tmp_path / "broken.pyicstask.json").write_text("{")
     (tmp_path / "nameless.pyicstask.json").write_text("{}")
-    assert _find_task_files(tmp_path, 3) == {Path(".tasks/a.pyicstask.json"): "A"}
+    assert find_task_files(tmp_path, 3) == {Path(".tasks/a.pyicstask.json"): "A"}
 
 
 # --- ReorderInput ---

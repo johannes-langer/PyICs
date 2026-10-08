@@ -91,7 +91,8 @@ class Next(KeyAction):
 
     @staticmethod
     def exec(**kwargs) -> None:
-        kwargs["pyics"].current_course.next()
+        if (course := kwargs["pyics"].current_course) is not None:
+            course.next()
 
 
 class Previous(KeyAction):
@@ -102,7 +103,19 @@ class Previous(KeyAction):
 
     @staticmethod
     def exec(**kwargs) -> None:
-        kwargs["pyics"].current_course.previous()
+        if (course := kwargs["pyics"].current_course) is not None:
+            course.previous()
+
+
+class Courses(KeyAction):
+    """Leave the current course for the course selector."""
+
+    def __init__(self, name: str = "Courses", key: str = "c", **kwargs):
+        super().__init__(name, key, **kwargs)
+
+    @staticmethod
+    def exec(**kwargs) -> None:
+        kwargs["pyics"].leave_course()
 
 
 class ResetTask(KeyAction):

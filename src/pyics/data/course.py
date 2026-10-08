@@ -3,10 +3,12 @@ from __future__ import annotations
 from fractions import Fraction
 from os import PathLike
 import os
+import threading
 from pathlib import Path
 from typing import Optional
 
 from rich.console import RenderableType
+from rich.text import Text
 
 from pyics.data.task import Task
 from pyics.util import json_handling as json
@@ -24,18 +26,119 @@ class Course:
     tasks: dict[str, PathLike]
 
     def __init__(
-        self, *, name: str, tasks: dict[str, PathLike], progress: list[int]
+        self,
+        *,
+        name: str,
+        tasks: dict[str, PathLike],
+        progress: list[int],
+        check_progress: bool = False,
     ) -> None:
+        """
+        Parameters
+        ----------
+        name: str
+            Name of the course.
+        tasks: dict[str, PathLike]
+            Ordered mapping of task names to task files.
+        progress: list[int]
+            Progress of each task (1 if solved), in the order of ``tasks``.
+        check_progress: bool (optional, keyword only)
+            If False (default), start right away on the first task that is unsolved
+            according to ``progress``. If True, the progress is instead checked from the
+            exercise files on disk, task by task in a background thread, and the course
+            starts on the first task found unsolved (see ``loading``).
+        """
         self.name = name
         self.tasks = tasks
         self.__tasks_list = list(self.tasks)
         self.__progress: list[int] = progress
 
-        # when you boot up a course, always show the next unsolved task
-        self.__current_task: Task = Task(
-            self.tasks[self.__tasks_list[int(self.__progress.index(0))]]
-        )
-        self.__task_changed: bool = True
+        self.__current_task: Task | None = None
+        self.__task_changed: bool = False
+        self.__progress_changed: bool = False
+        self.__error: Exception | None = None
+
+        # the position of the task whose progress is being checked
+        self.__checking: int | None = 0 if check_progress else None
+        self.__stop_check = threading.Event()
+        self.__check_thread: threading.Thread | None = None
+
+        if check_progress:
+            self.__check_thread = threading.Thread(
+                target=self.__check_progress, daemon=True
+            )
+            self.__check_thread.start()
+        else:
+            # when you boot up a course, always show the next unsolved task
+            start = self.__progress.index(0) if 0 in self.__progress else -1
+            self.__set_current_task(Task(self.tasks[self.__tasks_list[start]]))
+
+    def __set_current_task(self, task: Task) -> None:
+        self.__current_task = task
+        self.__task_changed = True
+
+    def __check_progress(self) -> None:
+        """
+        DO NOT CALL THIS METHOD DIRECTLY, IT IS RUN BY ``__init__``.
+
+        Check every task's progress from its exercise files, in order, and start on the
+        first unsolved task (the last task if all are solved) as soon as it is found.
+        """
+        last: Task | None = None
+        for i, name in enumerate(self.__tasks_list):
+            if self.__stop_check.is_set():
+                break
+            self.__checking = i
+            try:
+                last = Task(self.tasks[name], setup=False)
+                solved = last.check_solved()
+            except Exception as err:  # noqa: BLE001
+                get_logger(__name__).warning(
+                    f"Can't check the task {name!r} of {self.name!r}", exc_info=True
+                )
+                if self.__current_task is None:
+                    self.__error = err
+                    break
+                continue
+
+            if self.__progress[i] != int(solved):
+                self.__progress[i] = int(solved)
+                self.__progress_changed = True
+            if self.__current_task is None and not solved:
+                last.setup()
+                self.__set_current_task(last)
+        else:
+            if self.__current_task is None and last is not None:
+                last.setup()
+                self.__set_current_task(last)
+        self.__checking = None
+
+    def stop_progress_check(self, timeout: float | None = None) -> None:
+        """
+        Stop checking the progress after the task that is being checked, and wait for
+        that (at most ``timeout`` seconds).
+        """
+        self.__stop_check.set()
+        if self.__check_thread is not None:
+            self.__check_thread.join(timeout)
+
+    @property
+    def loading(self) -> bool:
+        """Whether the course is still looking for the task to start on."""
+        return self.__current_task is None
+
+    @property
+    def check_status(self) -> str:
+        """What the progress check is doing, or "" once it is done."""
+        if self.__checking is None:
+            return ""
+        return f"Checking your progress... (task {self.__checking + 1}/{len(self.tasks)})"
+
+    @property
+    def error(self) -> Exception | None:
+        """Why the course can't be started, if its progress check failed before a task
+        to start on was found."""
+        return self.__error
 
     @property
     def progress(self) -> Fraction:
@@ -43,6 +146,8 @@ class Course:
 
     @property
     def instructions(self) -> str:
+        if self.__current_task is None:
+            return ""
         return self.__current_task.instructions
 
     @property
@@ -50,6 +155,8 @@ class Course:
         """
         The current task's info, i.e. what is supposed to be displayed in the pyics header.
         """
+        if self.__current_task is None:
+            return ""
         return self.__current_task.info
 
     # @info.setter
@@ -65,70 +172,80 @@ class Course:
         The current task's status, i.e. what is supposed to be displayed in the pyics
         main panel.
         """
+        if self.__current_task is None:
+            return Text(self.check_status, style="dim")
         return self.__current_task.status
 
     def update_status(self) -> None:
         """
         Expose the current task's update_status() method.
         """
-        self.__current_task.update_status()
+        if self.__current_task is not None:
+            self.__current_task.update_status()
 
     @property
     def exercise_files(self) -> list[Path]:
         """
         The current task's exercise file paths.
         """
+        if self.__current_task is None:
+            return []
         return self.__current_task.exercise_files
 
-    def next(self) -> Task:
+    def __current_task_number(self) -> int:
+        """The current task's position in the course."""
+        assert self.__current_task is not None
+        return self.__tasks_list.index(
+            {v: k for k, v in self.tasks.items()}.get(self.__current_task.path)  # pyright: ignore[reportArgumentType]
+        )
+
+    def next(self) -> Task | None:
         """
         Select the next task. If the current task is unsolved, returns the current task.
 
         Returns
         -------
-        Task
-            Next task if the current task is solved, otherwise current task.
+        Task | None
+            Next task if the current task is solved, otherwise current task. None while
+            the course is loading.
         """
-        if self.__current_task.solved:
-            current_task_number = self.__tasks_list.index(
-                {v: k for k, v in self.tasks.items()}.get(self.__current_task.path)  # pyright: ignore[reportArgumentType]
-            )
+        if self.__current_task is not None and self.__current_task.solved:
+            current_task_number = self.__current_task_number()
 
             if current_task_number + 1 < len(self.__tasks_list):
-                self.__current_task = Task(
-                    self.tasks[self.__tasks_list[current_task_number + 1]]
+                self.__set_current_task(
+                    Task(self.tasks[self.__tasks_list[current_task_number + 1]])
                 )
-                self.__task_changed = True
 
         return self.__current_task
 
-    def previous(self) -> Task:
+    def previous(self) -> Task | None:
         """
         Select the previous task (if available)
 
         Returns
         -------
-        Task
+        Task | None
             Previous task if the current task isn't the first task, otherwise current
-            task.
+            task. None while the course is loading.
         """
-        # get course-specific name of current task
-        current_task_number = self.__tasks_list.index(
-            {v: k for k, v in self.tasks.items()}.get(self.__current_task.path)  # pyright: ignore[reportArgumentType]
-        )
+        if self.__current_task is None:
+            return None
+
+        current_task_number = self.__current_task_number()
 
         if current_task_number != 0:
-            self.__current_task = Task(
-                self.tasks[self.__tasks_list[current_task_number - 1]]
+            self.__set_current_task(
+                Task(self.tasks[self.__tasks_list[current_task_number - 1]])
             )
-            self.__task_changed = True
 
         return self.__current_task
 
     @property
     def task_changed(self) -> bool:
         """
-        Flag to indicate whether the current task has changed, set by next or previous.
+        Flag to indicate whether the current task has changed, set by next or previous,
+        and when the course has started on a task.
         """
         return self.__task_changed
 
@@ -138,7 +255,8 @@ class Course:
 
     def clear_test_results(self) -> None:
         """Expose the current task's clear_test_results method"""
-        self.__current_task.clear_test_results()
+        if self.__current_task is not None:
+            self.__current_task.clear_test_results()
 
     def tick(self) -> tuple[bool, bool]:
         """
@@ -155,27 +273,28 @@ class Course:
             first position indicates whether new test results from the current task are
             available,
             second position indicates whether the course progress has been updated (i.e.
-            whether a task has been newly solved/unsolved)
+            whether a task has been newly solved/unsolved, here or by the progress check)
         """
+        new_progress, self.__progress_changed = self.__progress_changed, False
+
+        if self.__current_task is None:
+            return (False, new_progress)
+
         files_changed = self.__current_task.check_file_changes()
 
         if files_changed:
             self.__current_task.run_tests()
 
-        current_task_number = self.__tasks_list.index(
-            {v: k for k, v in self.tasks.items()}.get(self.__current_task.path)  # pyright: ignore[reportArgumentType]
-        )
-        if self.__current_task.solved:
-            new_progress = not self.__progress[current_task_number] == 1
-            self.__progress[current_task_number] = 1
-        else:
-            new_progress = self.__progress[current_task_number] == 1
-            self.__progress[current_task_number] = 0
+        current_task_number = self.__current_task_number()
+        solved = int(self.__current_task.solved)
+        if self.__progress[current_task_number] != solved:
+            self.__progress[current_task_number] = solved
+            new_progress = True
 
         return (self.__current_task.new_test_results, new_progress)
 
     @classmethod
-    def load_course_manifest(cls, fp: PathLike) -> Course:
+    def load_course_manifest(cls, fp: PathLike, *, check_progress: bool = False) -> Course:
         """
         Load a course manifest to a ``Course`` object. Task file paths in the manifest
         are relative to the manifest's directory (see ``create_course_manifest``).
@@ -184,6 +303,9 @@ class Course:
         ----------
         fp: PathLike
             Path to the manifest
+        check_progress: bool (optional, keyword only)
+            Check the progress from the exercise files on disk (see ``Course``). Default
+            is False.
 
         Returns
         -------
@@ -196,7 +318,7 @@ class Course:
         base = Path(fp).parent
         data["tasks"] = {k: paths.resolve(v, base) for k, v in data["tasks"].items()}
 
-        return cls(**data)
+        return cls(**data, check_progress=check_progress)
 
     @staticmethod
     def create_course_manifest(
@@ -223,7 +345,7 @@ class Course:
             of the manifest, so the course keeps working when it is moved together with
             its tasks.
         name: str | None (optional, keyword only)
-            Name of the course. If None, use ``fp``'s stem.
+            Name of the course. If None, use ``fp``'s name without its suffix.
         use_task_names: bool (optional, keyword only)
             Use tasks' names for the mapping in the course manifest. Default is True.
             Setting this to False increases performance (no more json loading of tasks),
@@ -258,7 +380,7 @@ class Course:
 
         manifest = {}
 
-        manifest["name"] = name or fp.stem
+        manifest["name"] = name or fp.name.removesuffix(".pyicscourse.json")
 
         if use_task_names:
 
