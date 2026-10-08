@@ -245,6 +245,8 @@ def _check(test_cls: type[Test], param: inspect.Parameter, value: Any) -> Any:
         isinstance(value, list) and all(isinstance(v, str) for v in value)
     ):
         raise TypeError(f"expected a list of str, got {reprlib.repr(value)}")
+    if param.annotation is bool and not isinstance(value, bool):
+        raise TypeError(f"expected True or False, got {reprlib.repr(value)}")
     # checked now, rather than when the task file is written after all other fields
     json.dumps(value)
     return value

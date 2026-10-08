@@ -130,6 +130,18 @@ class ResetTask(KeyAction):
         ...
 
 
+class ToggleTrace(KeyAction):
+    """Turn tracing the current task's failed tests with snoop on or off."""
+
+    def __init__(self, name: str = "Trace", key: str = "t", **kwargs):
+        super().__init__(name, key, **kwargs)
+
+    @staticmethod
+    def exec(**kwargs) -> None:
+        if (course := kwargs["pyics"].current_course) is not None:
+            course.toggle_tracing()
+
+
 class ScrollUp(KeyAction):
     """Scroll the main content viewport up."""
 

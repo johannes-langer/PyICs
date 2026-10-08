@@ -14,6 +14,12 @@ _The ``PyICs`` app is currently still in development an not ready to be used._
 
 PyICs runs in the terminal on Linux, macOS and Windows 10 or later. On Windows, [Windows Terminal](https://aka.ms/terminal) is recommended.
 
+### Tracing Failed Tests
+
+When a test fails, <kbd>t</kbd> runs the task's tests again with [snoop](https://github.com/alexmojaki/snoop), which shows below each failed test what your code did: every line that was run, the values of the variables it changed, and the calls it made, with their arguments and return values. This trace mode stays on while you keep saving your exercise file, until <kbd>t</kbd> is pressed again, and it is off again for every other task you move to.
+
+Function tests (``SimpleTest``) trace the call of the tested function, and output tests (``PrintTest``) the run of the whole file. Their authors can turn tracing off for a test by creating it with ``traceable=False``, e.g. so that its arguments aren't revealed. Tests that check the structure or the signatures of your code (``StructureTest``, ``SpecTest``) aren't traced.
+
 ## Development Notes
 
 > This project is managed using ``uv``. After cloning the repository, run ``uv sync`` at the top level to create a virtual environment with the required packages installed.

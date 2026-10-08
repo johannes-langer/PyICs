@@ -18,6 +18,7 @@ from pyics.app.actions import (
     Quit,
     ScrollDown,
     ScrollUp,
+    ToggleTrace,
 )
 from pyics.app.cli import CLI
 from pyics.app.key_listener import hey_listen
@@ -179,6 +180,7 @@ class PyIC:
             Quit(cli=self.cli, pyics=self),
             Next(pyics=self),
             Previous(pyics=self),
+            ToggleTrace(pyics=self),
             Courses(pyics=self),
             ScrollUp(cli=self.cli, pyics=self),
             ScrollDown(cli=self.cli, pyics=self),

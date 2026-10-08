@@ -42,6 +42,19 @@ def _failure_text(report: pytest.TestReport) -> Text:
     return Text(report.longreprtext)
 
 
+def _failure_trace(report: pytest.TestReport) -> Text | None:
+    """The trace of the failed test of ``report``, or why there is none, if it was run
+    with tracing (see ``Task.tracing``)"""
+    if isinstance(report.longrepr, RichFailureRepr):
+        return report.longrepr.trace
+    return None
+
+
+def _traceable(test: Test) -> bool:
+    """Whether ``test`` can be traced, and its author allows it (see ``Test.run``)"""
+    return test.supports_trace and getattr(test, "traceable", True)
+
+
 def _path_list(files: StrPath | Sequence[StrPath] | None) -> list[StrPath]:
     """``files`` as a list of paths, whether given as one path, several or None."""
     if files is None:
@@ -67,6 +80,9 @@ class Task:
     __info: RenderableType
     __solved: bool = False
     __new_test_results: bool = False
+    __tracing: bool = False
+    # whether the current test results were traced
+    __traced: bool = False
 
     def __init__(self, task_file: StrPath, *, setup: bool = True):
         """
@@ -212,24 +228,40 @@ class Task:
         )
 
         sections: list[RenderableType] = [summary]
+        if self.__traced:
+            sections.append(
+                Text("Tracing failed tests with snoop, press t to stop.", style="dim")
+            )
+        elif failed_reports and any(_traceable(t) for t in self.tests):
+            sections.append(
+                Text("Press t to trace failed tests with snoop.", style="dim")
+            )
 
         if failed_reports:
             failures = [(r.nodeid, _failure_text(r)) for r in failed_reports]
+            traces = [_failure_trace(r) for r in failed_reports]
 
             # one rule + traceback per failure, mirroring pytest's own failure sections
             sections.append(
                 Padding(Rule("[white]FAILURES[/]", style="white"), pad=(1, 0, 0, 0))
             )
-            sections += [
-                Group(
+            for (nodeid, text), trace in zip(failures, traces):
+                failure: list[RenderableType] = [
                     Padding(
                         Rule(Text(nodeid, style="bold bright_red"), style="bright_red"),
                         pad=(1, 0, 0, 0),
                     ),
                     Text.assemble(text, style="red"),
-                )
-                for nodeid, text in failures
-            ]
+                ]
+                if trace is not None:
+                    failure += [
+                        Padding(
+                            Rule(Text("trace", style="dim"), style="dim"),
+                            pad=(1, 0, 0, 0),
+                        ),
+                        trace,
+                    ]
+                sections.append(Group(*failure))
 
             # pytest's "short test summary info", one line per failed test
             sections.append(
@@ -268,6 +300,19 @@ class Task:
     @property
     def solved(self) -> bool:
         return self.__solved
+
+    @property
+    def tracing(self) -> bool:
+        """
+        Whether the tests are traced with ``snoop`` when they are run, to show the trace
+        of each failed test below its failure (see ``Test.run``). Off for a new task.
+        """
+        return self.__tracing
+
+    def toggle_tracing(self) -> None:
+        """Turn ``tracing`` on or off, and run the tests again to show the change."""
+        self.__tracing = not self.__tracing
+        self.run_tests()
 
     def check_file_changes(self) -> bool:
         """
@@ -330,12 +375,14 @@ class Task:
         """Run the tests while they are pending. ``self._tests_lock`` must be held."""
         while self._tests_pending:
             self._tests_pending = False
-            plugin = LiveTestCollectionPlugin(self.tests)
+            tracing = self.__tracing
+            plugin = LiveTestCollectionPlugin(self.tests, tracing=tracing)
 
             with _pytest_lock, terminal.preserve_terminal_mode():
                 pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
 
             self.test_results = plugin.reports
+            self.__traced = tracing
             self.__tested = True
 
             # log reports
