@@ -1,11 +1,11 @@
 from os import PathLike
 from pathlib import Path
-import sys
 
 import jsonargparse
 
-from pyics.app.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI, SHOW_CURSOR
+from pyics.app.cli import CLI
 from pyics.util.logging import setup_logging
+from pyics.util.terminal import fullscreen
 from pyics.app.pyics import PyIC
 from pyics.scripts.create_course import _create_course
 from pyics.scripts.create_task import _create_task
@@ -23,21 +23,16 @@ def main(*, log_level: str | int = 50, log_file: PathLike = Path("./.pyics.log")
 
     setup_logging(log_level, log_file)
 
-    sys.stdout.write(ALT_SCREEN_ENTER)
-    sys.stdout.flush()
+    with fullscreen():
+        cli = CLI()
 
-    cli = CLI()
+        pyics = PyIC(cli)
 
-    pyics = PyIC(cli)
-
-    try:
-        pyics()
-        pyics.thread.join()
-    finally:
-        cli.stop()
-        sys.stdout.write(SHOW_CURSOR)
-        sys.stdout.write(ALT_SCREEN_LEAVE)
-        sys.stdout.flush()
+        try:
+            pyics()
+            pyics.thread.join()
+        finally:
+            cli.stop()
     # after leaving the alternate screen, so that it stays visible
     if pyics.exit_message:
         print(pyics.exit_message)

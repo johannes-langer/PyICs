@@ -8,6 +8,7 @@ files are saved to have the current task's tests run.
 
 import json
 import os
+import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -20,11 +21,12 @@ import pytest
 from prompt_toolkit.input import PipeInput, create_pipe_input
 from prompt_toolkit.key_binding import KeyPress
 
-from pyics.app.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI, SHOW_CURSOR
+from pyics.app.cli import CLI
 from pyics.app.pyics import PyIC
 from pyics.data import Course, Task
 from pyics.scripts import main
 from pyics.tests.tests import PrintTest, SimpleTest, Test
+from pyics.util.terminal import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, SHOW_CURSOR
 
 # a crash in one of the interface's threads fails the test, instead of only warning
 pytestmark = pytest.mark.filterwarnings(
@@ -644,7 +646,11 @@ def run_main(
 ) -> Callable[[], str]:
     """Runs the ``pyics`` script's ``main`` in the terminal until it returns, and returns
     everything it wrote to stdout. Cancels the course selector once shown."""
-    monkeypatch.setattr(main, "sys", SimpleNamespace(stdout=terminal.stdout))
+    # replaced where the alternate screen is entered and left, like for the CLI
+    monkeypatch.setattr(
+        "pyics.util.terminal.sys",
+        SimpleNamespace(stdout=terminal.stdout, stdin=sys.stdin, platform=sys.platform),
+    )
     monkeypatch.setattr(main, "setup_logging", lambda *args: None)
 
     def cancel_course_selector() -> None:

@@ -1,4 +1,3 @@
-import sys
 from collections.abc import Mapping
 from os import PathLike
 from pathlib import Path
@@ -9,7 +8,7 @@ from rich.markup import escape
 from rich.text import Text
 
 import pyics.util.json_handling as json
-from pyics.app.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI, SHOW_CURSOR
+from pyics.app.cli import CLI
 from pyics.app.key_listener import KeyListener
 from pyics.app.prompts import (
     PathInput,
@@ -24,6 +23,7 @@ from pyics.data.task import Task
 from pyics.scripts.create_task import _EDIT, _KEEP, _REMOVE, _check_name, _task_flow
 from pyics.util import paths
 from pyics.util.discovery import TASK_SUFFIX, find_task_files
+from pyics.util.terminal import fullscreen
 
 _TOTAL_STEPS = 3
 _INFO = "Creating a new course..."
@@ -269,37 +269,33 @@ def _create_course(fp: PathLike | None = None, max_depth: int = 3) -> None:
         How many directory levels below the working directory are searched for task
         files, so the search stays short when run in e.g. the home directory.
     """
-    sys.stdout.write(ALT_SCREEN_ENTER)
-    sys.stdout.flush()
+    with fullscreen():
+        cli = CLI()
+        cli()
+        cli.update_info("Searching for task files...")
 
-    cli = CLI()
-    cli()
-    cli.update_info("Searching for task files...")
+        try:
+            # searched once up front, since the flow is replayed whenever the user
+            # goes back
+            found = find_task_files(Path.cwd(), max_depth)
+            cli.update_info(_INFO)
 
-    try:
-        # searched once up front, since the flow is replayed whenever the user goes back
-        found = find_task_files(Path.cwd(), max_depth)
-        cli.update_info(_INFO)
+            with KeyListener() as q:
+                fields = PromptSession(cli, q, info=_INFO).run(
+                    lambda s: _course_flow(s, found)
+                )
 
-        with KeyListener() as q:
-            fields = PromptSession(cli, q, info=_INFO).run(
-                lambda s: _course_flow(s, found)
+            task_files: list[PathLike] = []
+            for path, task_fields in fields["tasks"]:
+                if task_fields is not None:
+                    path = Task.create_task_json(path, **task_fields)
+                task_files.append(path.absolute())
+
+            fp = Course.create_course_manifest(
+                fp or Path(f"./{fields['name']}"), task_files, name=fields["name"]
             )
-
-        task_files: list[PathLike] = []
-        for path, task_fields in fields["tasks"]:
-            if task_fields is not None:
-                path = Task.create_task_json(path, **task_fields)
-            task_files.append(path.absolute())
-
-        fp = Course.create_course_manifest(
-            fp or Path(f"./{fields['name']}"), task_files, name=fields["name"]
-        )
-        cli.update_info(f"Course written to {escape(str(fp))}")
-    except PromptCancelled:
-        cli.update_info("Cancelled, no course was created.")
-    finally:
-        cli.running = False
-        sys.stdout.write(SHOW_CURSOR)
-        sys.stdout.write(ALT_SCREEN_LEAVE)
-        sys.stdout.flush()
+            cli.update_info(f"Course written to {escape(str(fp))}")
+        except PromptCancelled:
+            cli.update_info("Cancelled, no course was created.")
+        finally:
+            cli.stop()

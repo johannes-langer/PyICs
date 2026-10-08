@@ -7,7 +7,7 @@ from typing import Any
 from rich.markup import escape
 
 import pyics.util.json_handling as json
-from pyics.app.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI, SHOW_CURSOR
+from pyics.app.cli import CLI
 from pyics.app.key_listener import KeyListener
 from pyics.app.prompts import PromptCancelled, PromptSession
 from pyics.data.course import Course
@@ -20,6 +20,7 @@ from pyics.scripts.create_course import (
 )
 from pyics.util import paths
 from pyics.util.discovery import COURSE_SUFFIX, find_courses, find_task_files
+from pyics.util.terminal import fullscreen
 
 
 def _read_course(
@@ -86,51 +87,47 @@ def _edit_course(course_file: PathLike, max_depth: int = 3) -> None:
     except Exception as err:  # noqa: BLE001
         sys.exit(f"error: can't read the course manifest {course_file}: {err}")
 
-    sys.stdout.write(ALT_SCREEN_ENTER)
-    sys.stdout.flush()
+    with fullscreen():
+        cli = CLI()
+        cli()
+        cli.update_info("Searching for task files and course manifests...")
 
-    cli = CLI()
-    cli()
-    cli.update_info("Searching for task files and course manifests...")
+        try:
+            # searched once up front, since the flow is replayed whenever the user
+            # goes back
+            found = find_task_files(Path.cwd(), max_depth)
+            courses = find_courses(Path.cwd(), max_depth)
+            courses.pop(paths.absolute(course_file), None)  # rewritten as a whole
+            current, progress = _read_course(course_file, manifest, courses)
+            info = f"Editing the course {escape(str(current['name']))}..."
+            cli.update_info(info)
 
-    try:
-        # searched once up front, since the flow is replayed whenever the user goes back
-        found = find_task_files(Path.cwd(), max_depth)
-        courses = find_courses(Path.cwd(), max_depth)
-        courses.pop(paths.absolute(course_file), None)  # rewritten as a whole
-        current, progress = _read_course(course_file, manifest, courses)
-        info = f"Editing the course {escape(str(current['name']))}..."
-        cli.update_info(info)
+            with KeyListener() as q:
+                fields = PromptSession(cli, q, info=info).run(
+                    lambda s: _course_flow(s, found, current)
+                )
 
-        with KeyListener() as q:
-            fields = PromptSession(cli, q, info=info).run(
-                lambda s: _course_flow(s, found, current)
+            task_files: list[PathLike] = []
+            renamed: dict[Path, None] = {}  # ordered set
+            for path, task_fields in fields["tasks"]:
+                if task_fields is not None:
+                    path = Task.create_task_json(path, **task_fields)
+                    for fp in _rename_in_courses(path, task_fields["name"], courses):
+                        renamed[fp] = None
+                task_files.append(path.absolute())
+
+            fp = Course.create_course_manifest(
+                course_file,
+                task_files,
+                name=fields["name"],
+                progress=[progress.get(paths.absolute(p), 0) for p in task_files],
             )
-
-        task_files: list[PathLike] = []
-        renamed: dict[Path, None] = {}  # ordered set
-        for path, task_fields in fields["tasks"]:
-            if task_fields is not None:
-                path = Task.create_task_json(path, **task_fields)
-                for fp in _rename_in_courses(path, task_fields["name"], courses):
-                    renamed[fp] = None
-            task_files.append(path.absolute())
-
-        fp = Course.create_course_manifest(
-            course_file,
-            task_files,
-            name=fields["name"],
-            progress=[progress.get(paths.absolute(p), 0) for p in task_files],
-        )
-        message = f"Course written to {fp}"
-        if renamed:
-            message += f", and tasks renamed in {', '.join(map(str, renamed))}"
-    except PromptCancelled:
-        message = "Cancelled, the course was not changed."
-    finally:
-        cli.stop()
-        sys.stdout.write(SHOW_CURSOR)
-        sys.stdout.write(ALT_SCREEN_LEAVE)
-        sys.stdout.flush()
+            message = f"Course written to {fp}"
+            if renamed:
+                message += f", and tasks renamed in {', '.join(map(str, renamed))}"
+        except PromptCancelled:
+            message = "Cancelled, the course was not changed."
+        finally:
+            cli.stop()
     # after leaving the alternate screen, so that it stays visible
     print(message)
