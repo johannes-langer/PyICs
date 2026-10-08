@@ -1,6 +1,11 @@
 {
     "name": "Depth-First Search",
     "instructions": "Implement depth-first search using a non-recursive stack-based approach.",
+    "help": [
+        "Keep the paths that are still to be explored in a stack (a list): take them from the top with pop(), and add new ones on top with append.",
+        "Start with a stack that holds the path (start,). Take the top path: if it ends at the goal, return it. Otherwise, push one longer path for each neighbor of its last node.",
+        "Push the neighbors in reverse order, so the first neighbor is explored first. Skip neighbors that are already on the path, and if the stack runs empty, return None."
+    ],
     "ex_files": [
         {
             "__pathlib__": "../.exercises/dfs.py"

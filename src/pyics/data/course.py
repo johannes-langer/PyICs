@@ -7,7 +7,10 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from rich.console import RenderableType
+from rich.console import Group, RenderableType
+from rich.padding import Padding
+from rich.rule import Rule
+from rich.table import Table
 from rich.text import Text
 
 from pyics.data.task import Task
@@ -15,6 +18,17 @@ from pyics.util import json_handling as json
 from pyics.util import paths
 from pyics.util.paths import StrPath
 from pyics.util.logging import get_logger
+
+
+def _hints_view(hints: list[str], total: int) -> RenderableType:
+    """The revealed ``hints`` of a task with ``total`` hints, numbered below a rule."""
+    grid = Table.grid(padding=(0, 1))
+    grid.add_column(justify="right", style="bright_yellow")
+    grid.add_column()
+    for i, hint in enumerate(hints, 1):
+        grid.add_row(f"{i}.", Text(hint))
+    rule = Rule(f"[bright_yellow]Hints {len(hints)}/{total}[/]", style="bright_yellow")
+    return Padding(Group(rule, grid), pad=(0, 0, 1, 0))
 
 
 class Course:
@@ -58,6 +72,9 @@ class Course:
         self.__task_changed: bool = False
         self.__progress_changed: bool = False
         self.__error: Exception | None = None
+        # how many hints have been revealed, by task name, so they stay revealed when a
+        # task is left and visited again
+        self.__hints_shown: dict[str, int] = {}
 
         # the position of the task whose progress is being checked
         self.__checking: int | None = 0 if check_progress else None
@@ -151,6 +168,36 @@ class Course:
             return ""
         return self.__current_task.instructions
 
+    def __current_task_name(self) -> str:
+        """The current task's name in the course."""
+        return self.__tasks_list[self.__current_task_number()]
+
+    @property
+    def hints(self) -> list[str]:
+        """The current task's hints that have been revealed (see ``reveal_hint``)."""
+        if self.__current_task is None:
+            return []
+        shown = self.__hints_shown.get(self.__current_task_name(), 0)
+        return self.__current_task.help[:shown]
+
+    def reveal_hint(self) -> bool:
+        """
+        Reveal the current task's next hint, if it has one that hasn't been revealed.
+
+        Returns
+        -------
+        bool
+            Whether a hint has been revealed. False while the course is loading.
+        """
+        if self.__current_task is None:
+            return False
+        name = self.__current_task_name()
+        shown = self.__hints_shown.get(name, 0)
+        if shown >= len(self.__current_task.help):
+            return False
+        self.__hints_shown[name] = shown + 1
+        return True
+
     @property
     def info(self) -> RenderableType:
         """
@@ -171,10 +218,13 @@ class Course:
     def status(self) -> RenderableType:
         """
         The current task's status, i.e. what is supposed to be displayed in the pyics
-        main panel.
+        main panel, below its revealed hints.
         """
         if self.__current_task is None:
             return Text(self.check_status, style="dim")
+        if hints := self.hints:
+            total = len(self.__current_task.help)
+            return Group(_hints_view(hints, total), self.__current_task.status)
         return self.__current_task.status
 
     def update_status(self) -> None:

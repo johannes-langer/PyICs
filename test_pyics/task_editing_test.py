@@ -97,6 +97,7 @@ def task_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 KEEP_ALL = [
     ENTER,  # name
     CTRL_D,  # instructions
+    ENTER,  # add a hint: no
     ENTER, ENTER,  # keep ex.py, add another exercise file: no
     ENTER, ENTER,  # keep sol.py, add another solution file: no
     ENTER,  # keep the test
@@ -203,7 +204,7 @@ def test_changed_file_is_shown_and_kept_or_updated(
 ) -> None:
     Path("ex.py").write_text(TEMPLATE.replace("0", "2"))
     choose = [DOWN, ENTER] if update else [ENTER]  # update / keep
-    fields, s = _edit([*KEEP_ALL[:2], *choose, *KEEP_ALL[3:]], task_file)
+    fields, s = _edit([*KEEP_ALL[:3], *choose, *KEEP_ALL[4:]], task_file)
 
     shown = _shown(s, "Exercise file ex.py")
     assert "Update" in shown
@@ -223,9 +224,9 @@ def test_replaced_file_keeps_its_tests(task_file: Path) -> None:
     Path("new.py").write_text(TEMPLATE)
     fields, _ = _edit(
         [
-            *KEEP_ALL[:2],
+            *KEEP_ALL[:3],
             DOWN, ENTER, *_clear("ex.py"), *_type("new.py"),  # replace ex.py
-            *KEEP_ALL[3:],  # the test can be kept
+            *KEEP_ALL[4:],  # the test can be kept
         ],
         task_file,
     )  # fmt: skip
@@ -241,11 +242,11 @@ def test_tests_of_a_removed_file_cant_be_kept(task_file: Path) -> None:
     Path("new.py").write_text(TEMPLATE)
     fields, s = _edit(
         [
-            *KEEP_ALL[:2],
+            *KEEP_ALL[:3],
             DOWN, DOWN, ENTER,  # remove ex.py
             *_type("new.py"),  # a task needs an exercise file
             ENTER,  # add another exercise file: no
-            *KEEP_ALL[4:6],
+            *KEEP_ALL[5:7],
             DOWN, ENTER,  # the test can only be edited or removed: remove it
             ENTER,
         ],
@@ -261,7 +262,7 @@ def test_tests_of_a_removed_file_cant_be_kept(task_file: Path) -> None:
 def test_edit_test_prefilled(task_file: Path) -> None:
     fields, _ = _edit(
         [
-            *KEEP_ALL[:6],
+            *KEEP_ALL[:7],
             DOWN, ENTER,  # edit the test
             ENTER,  # reference a file with test information: no
             ENTER, ENTER, ENTER,  # name, file_path, function_name: keep
@@ -281,9 +282,9 @@ def test_edit_test_of_a_removed_file(task_file: Path) -> None:
     Path("new.py").write_text(TEMPLATE)
     fields, _ = _edit(
         [
-            *KEEP_ALL[:2],
+            *KEEP_ALL[:3],
             DOWN, DOWN, ENTER, *_type("new.py"), ENTER,  # remove ex.py, add new.py
-            *KEEP_ALL[4:6],
+            *KEEP_ALL[5:7],
             ENTER,  # edit the test, preselected since it can't be kept
             ENTER, ENTER,  # no test information file, name: keep
             ENTER,  # file_path: new.py, the only exercise file
@@ -305,7 +306,7 @@ def test_values_without_a_python_repr_are_prefilled_by_reference(
 
     fields, s = _edit(
         [
-            ENTER, CTRL_D, ENTER, ENTER, ENTER,  # name, instructions, files
+            ENTER, CTRL_D, ENTER, ENTER, ENTER, ENTER,  # name, instructions, hints, files
             DOWN, ENTER,  # edit the test
             ENTER,  # reference a file with test information: no
             ENTER, ENTER, ENTER, ENTER,  # name, file_path, function_name, expected
@@ -323,7 +324,7 @@ def test_strings_are_prefilled_despite_test_information(task_file: Path) -> None
     Path("info.py").write_text("other = 'x'\n")
     fields, _ = _edit(
         [
-            *KEEP_ALL[:6],
+            *KEEP_ALL[:7],
             DOWN, ENTER,  # edit the test
             UP, ENTER, *_type("info.py"),  # reference a file with test information
             ENTER, ENTER,  # name: enter text (preselected), keep it
@@ -360,6 +361,95 @@ def test_adding_a_file_twice_is_rejected(
         Path("b.py"),
     ]
     assert any("already one of the task's files" in i for i in _info(s))
+
+
+# --- hints ---
+
+
+@pytest.fixture
+def hinted_task_file(task_file: Path) -> Path:
+    """The task of the ``task_file`` fixture, with two hints."""
+    fields = Task.read_task_json(task_file)
+    return Task.create_task_json(task_file, **{**fields, "help": ["first", "second"]})
+
+
+def test_hints_round_trip(hinted_task_file: Path) -> None:
+    original = hinted_task_file.read_text()
+    fields = Task.read_task_json(hinted_task_file)
+    assert fields["help"] == ["first", "second"]
+    assert Task(hinted_task_file, setup=False).help == ["first", "second"]
+
+    Task.create_task_json(hinted_task_file, **fields)
+    assert hinted_task_file.read_text() == original
+
+
+def test_a_task_file_without_hints_has_none(task_file: Path) -> None:
+    raw = json.loads(task_file.read_text())
+    del raw["help"]  # e.g. a task file written before tasks had hints
+    task_file.write_text(json.dumps(raw))
+    assert Task.read_task_json(task_file)["help"] == []
+    assert Task(task_file, setup=False).help == []
+
+
+def test_a_single_hint_can_be_given_as_a_string(task_file: Path) -> None:
+    Task.create_task_json(task_file, **{**Task.read_task_json(task_file), "help": "h"})
+    assert Task.read_task_json(task_file)["help"] == ["h"]
+
+
+def test_confirming_everything_keeps_the_hints(hinted_task_file: Path) -> None:
+    original = hinted_task_file.read_text()
+    fields, _ = _edit(
+        [*KEEP_ALL[:2], ENTER, ENTER, *KEEP_ALL[2:]],  # keep both hints, add none
+        hinted_task_file,
+    )
+    assert fields["help"] == ["first", "second"]
+
+    Task.create_task_json(hinted_task_file, **fields)
+    assert hinted_task_file.read_text() == original
+
+
+def test_add_hints(task_file: Path) -> None:
+    fields, _ = _edit(
+        [
+            *KEEP_ALL[:2],
+            UP, ENTER, *"Look at f.", CTRL_D,  # add a hint: yes
+            UP, ENTER, *"Return 1.", CTRL_D,  # add another hint: yes
+            ENTER,  # add another hint: no
+            *KEEP_ALL[3:],
+        ],
+        task_file,
+    )  # fmt: skip
+    assert fields["help"] == ["Look at f.", "Return 1."]
+
+
+def test_edit_and_remove_hints(hinted_task_file: Path) -> None:
+    fields, s = _edit(
+        [
+            *KEEP_ALL[:2],
+            DOWN, ENTER, *_clear("first"), *"1st", CTRL_D,  # edit the first hint
+            DOWN, DOWN, ENTER,  # remove the second hint
+            ENTER,  # add another hint: no
+            *KEEP_ALL[3:],
+        ],
+        hinted_task_file,
+    )  # fmt: skip
+    assert fields["help"] == ["1st"]
+    assert "second" in _shown(s, "Hint 2 of 2")
+
+
+def test_empty_hints_are_rejected(task_file: Path) -> None:
+    fields, s = _edit(
+        [
+            *KEEP_ALL[:2],
+            UP, ENTER, *"  ", CTRL_D,  # add a hint: yes, but it's empty...
+            *_clear("  "), *"Return 1.", CTRL_D,  # ...fixed
+            ENTER,  # add another hint: no
+            *KEEP_ALL[3:],
+        ],
+        task_file,
+    )  # fmt: skip
+    assert fields["help"] == ["Return 1."]
+    assert any("the hint may not be empty" in i for i in _info(s))
 
 
 # --- the edit_task script ---

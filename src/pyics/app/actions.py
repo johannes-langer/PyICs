@@ -154,3 +154,14 @@ class ScrollDown(KeyAction):
     @staticmethod
     def exec(**kwargs) -> None:
         kwargs["cli"].scroll(1)
+
+
+class Hint(KeyAction):
+    """Reveal the current task's next hint."""
+
+    def __init__(self, name: str = "Hint", key: str = "h", **kwargs):
+        super().__init__(name, key, **kwargs)
+
+    @staticmethod
+    def exec(**kwargs) -> None:
+        kwargs["pyics"].reveal_hint()

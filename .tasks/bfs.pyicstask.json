@@ -1,6 +1,11 @@
 {
     "name": "Breadth-First Search",
     "instructions": "Implement breadth-first search using a non-recursive queue-based approach.",
+    "help": [
+        "Keep the paths that are still to be explored in a queue (a list): take them from the front with pop(0), and add new ones at the back with append.",
+        "Start with a queue that holds the path (start,). Take the first path: if it ends at the goal, return it. Otherwise, add one longer path for each neighbor of its last node.",
+        "Skip neighbors that are already on the path, so you don't walk in circles. If the queue runs empty, there is no path: return None."
+    ],
     "ex_files": [
         {
             "__pathlib__": "../.exercises/bfs.py"

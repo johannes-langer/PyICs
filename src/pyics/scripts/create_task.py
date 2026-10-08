@@ -31,7 +31,7 @@ from pyics.tests.tests import PrintTest, SimpleTest, SpecTest, StructureTest
 from pyics.util import paths
 from pyics.util.terminal import fullscreen
 
-_TOTAL_STEPS = 5
+_TOTAL_STEPS = 6
 _INFO = "Creating a new task..."
 _ENTER_TEXT = "Enter text"
 
@@ -51,6 +51,11 @@ _TEST_HINTS = {
     _KEEP: "Keep the test as it is.",
     _EDIT: "Go through the test's parameters, prefilled with its current values.",
     _REMOVE: "Remove the test from the task.",
+}
+_HINT_ACTIONS = {
+    _KEEP: "Keep the hint as it is.",
+    _EDIT: "Change the hint, prefilled with its current text.",
+    _REMOVE: "Remove the hint from the task.",
 }
 # lines of a diff shown when a file on disk differs from its contents in the task file
 _MAX_DIFF_LINES = 30
@@ -429,6 +434,40 @@ def _repoint(test: Test, moved: Mapping[Path, Path | None]) -> Test:
     return test
 
 
+def _check_hint(hint: str) -> str:
+    """Return ``hint`` if it can be used as a hint, raise otherwise."""
+    if not hint.strip():
+        raise ValueError("the hint may not be empty")
+    return hint
+
+
+def _prompt_hints(s: PromptSession, current: list[str] | None = None) -> list[str]:
+    """
+    Interactively define any number of hints, which the student can reveal one at a
+    time, in order. When editing a task, its ``current`` hints are kept, edited or
+    removed first. Adding a hint is never preselected, so confirming every prompt adds
+    none.
+    """
+    hints: list[str] = []
+    for i, hint in enumerate(current or [], 1):
+        label = f"Hint {i} of {len(current or [])}"
+        details = Text(hint, style="dim")
+        options = [_KEEP, _EDIT, _REMOVE]
+        choice = s.ask(
+            SelectInput(label, options, hints=_HINT_ACTIONS, details=details)
+        )
+        if choice == _KEEP:
+            hints.append(hint)
+        elif choice == _EDIT:
+            prompt = TextInput(f"Hint {len(hints) + 1}", multiline=True, initial=hint)
+            hints.append(s.ask(prompt, _check_hint))
+
+    while _confirm(s, "Add another hint?" if hints else "Add a hint?", default=False):
+        prompt = TextInput(f"Hint {len(hints) + 1}", multiline=True)
+        hints.append(s.ask(prompt, _check_hint))
+    return hints
+
+
 def _check_name(name: str, taken_names: Collection[str]) -> str:
     """Return ``name`` if it can be used for a task (or course), raise otherwise."""
     if not name:
@@ -470,10 +509,13 @@ def _task_flow(
     initial = current["instructions"] if current is not None else ""
     instructions = s.ask(TextInput("Instructions", multiline=True, initial=initial))
 
+    s.cli.update_progress(2 / _TOTAL_STEPS)
+    hints = _prompt_hints(s, current["help"] if current is not None else None)
+
     file_contents: dict[Path, str] = {}
     moved: dict[Path, Path | None] = {}
 
-    s.cli.update_progress(2 / _TOTAL_STEPS)
+    s.cli.update_progress(3 / _TOTAL_STEPS)
     if current is None:
         ex_files = _prompt_files(s, "exercise")
     else:
@@ -482,7 +524,7 @@ def _task_flow(
         )
         file_contents.update(ex_contents)
 
-    s.cli.update_progress(3 / _TOTAL_STEPS)
+    s.cli.update_progress(4 / _TOTAL_STEPS)
     if current is None:
         sol_files = _prompt_files(s, "solution")
     else:
@@ -491,14 +533,14 @@ def _task_flow(
         )
         file_contents.update(sol_contents)
 
-    s.cli.update_progress(4 / _TOTAL_STEPS)
+    s.cli.update_progress(5 / _TOTAL_STEPS)
     if current is None:
         tests = _prompt_tests(s, ex_files)
     else:
         current_tests = [_repoint(test, moved) for test in current["tests"]]
         tests = _prompt_tests(s, ex_files, current_tests)
 
-    s.cli.update_progress(5 / _TOTAL_STEPS)
+    s.cli.update_progress(6 / _TOTAL_STEPS)
     return {
         "name": name,
         "instructions": instructions,
@@ -506,6 +548,7 @@ def _task_flow(
         "sol_files": sol_files,
         "tests": tests or None,
         "file_contents": file_contents,
+        "help": hints,
     }
 
 

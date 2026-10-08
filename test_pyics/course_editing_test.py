@@ -43,6 +43,7 @@ KEEP_ALL = [
 # confirms every prompt of the edit flow for one of the fixture's tasks, after its name
 KEEP_TASK = [
     CTRL_D,  # instructions
+    ENTER,  # add a hint: no
     ENTER, ENTER,  # keep its exercise file, add another one: no
     ENTER,  # add a solution file: no
     ENTER,  # done adding tests
@@ -344,6 +345,7 @@ def test_new_task_is_written(
             *KEEP_ALL[:4],
             UP, ENTER,  # create a new task
             *_type("D"), CTRL_D,  # name, instructions
+            ENTER,  # add a hint: no
             *_type("d.py"), DOWN, ENTER,  # one exercise file
             DOWN, ENTER,  # no solution file
             *[DOWN] * len(_TEST_TYPES), ENTER,  # no tests

@@ -51,6 +51,15 @@ def _path_list(files: StrPath | Sequence[StrPath] | None) -> list[StrPath]:
     return list(files)
 
 
+def _hint_list(hints: str | Sequence[str] | None) -> list[str]:
+    """``hints`` as a list of hints, whether given as one hint, several or None."""
+    if hints is None:
+        return []
+    if isinstance(hints, str):
+        return [hints]
+    return list(hints)
+
+
 class Task:
     """Unified Task Representation"""
 
@@ -83,6 +92,8 @@ class Task:
 
         self.name: str = raw_json.get("name", "Task")
         self.instructions: str = raw_json.get("instructions", "")
+        # revealed one at a time, in order (see ``Course.reveal_hint``)
+        self.help: list[str] = _hint_list(raw_json.get("help"))
 
         self.exercise_files: list[Path] = [
             paths.resolve(fp, base) for fp in raw_json.get("ex_files", [])
@@ -391,8 +402,8 @@ class Task:
         Returns
         -------
         dict[str, Any]
-            ``name``, ``instructions``, ``ex_files``, ``sol_files`` and ``tests``, and
-            the contents stored for the exercise and solution files as
+            ``name``, ``instructions``, ``ex_files``, ``sol_files``, ``tests`` and
+            ``help``, and the contents stored for the exercise and solution files as
             ``file_contents``, by path.
         """
         with open(fp, "r", encoding="utf-8") as f:
@@ -417,6 +428,7 @@ class Task:
             "sol_files": sol_files,
             "tests": tests,
             "file_contents": file_contents,
+            "help": _hint_list(raw_json.get("help")),
         }
 
     @staticmethod
@@ -428,6 +440,7 @@ class Task:
         sol_files: StrPath | Sequence[StrPath] | None = None,
         tests: Union[Test, list[Test], None] = None,
         file_contents: Mapping[StrPath, str] | None = None,
+        help: str | Sequence[str] | None = None,
     ) -> Path:
         """
         Create a task_json from all relevant information as it would naturally be available
@@ -456,6 +469,9 @@ class Task:
             Contents to store for some of the exercise and solution files, by path,
             instead of reading these files, e.g. the contents already stored in the task
             file when editing it (see ``read_task_json``). Other files are read.
+        help: str | Sequence[str] | None
+            Hint or list of hints for the task, which the student can reveal one at a
+            time, in order.
 
         Returns
         -------
@@ -469,6 +485,7 @@ class Task:
 
         task["name"] = name
         task["instructions"] = instructions
+        task["help"] = _hint_list(help)
 
         ex_files = _path_list(ex_files)
         sol_files = _path_list(sol_files)

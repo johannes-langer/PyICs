@@ -336,7 +336,7 @@ def test_next_and_previous_move_between_tasks_once_solved(
 
 
 def test_arrow_keys_scroll_the_main_content(app: App) -> None:
-    app.resize(80, 24)  # leaves 8 lines for the main content
+    app.resize(80, 24)  # leaves 7 lines for the main content
     app.wait_for(lambda: "2 failed" not in app.screen)
     top = app.screen
     app.press(DOWN)
@@ -635,6 +635,76 @@ def test_exercise_files_are_kept(
     second_session.select()
     second_session.wait_for(lambda: "2 failed" in second_session.screen)
     assert add.read_text() == work
+
+
+# --- hints ---
+
+ADD_HINTS = ["Python adds numbers with +.", "return a + b"]
+
+
+@pytest.fixture
+def hinted_app(exercises: tuple[Path, Path], launch: Callable[[], App]) -> App:
+    """Like ``app``, with two hints for the first task (add); the second has none."""
+    task_file = Path("add.pyicstask.json")
+    fields = Task.read_task_json(task_file)
+    Task.create_task_json(task_file, **{**fields, "help": ADD_HINTS})
+    app = launch()
+    app.select()
+    app.wait_for(lambda: "2 failed" in app.screen)
+    return app
+
+
+def test_h_reveals_one_hint_at_a_time(hinted_app: App) -> None:
+    app = hinted_app
+    assert "<h> Hint" in app.screen
+    assert "Hints" not in app.screen
+
+    app.press("h")
+    app.wait_for(lambda: "Hints 1/2" in app.screen)
+    assert ADD_HINTS[0] in app.screen and ADD_HINTS[1] not in app.screen
+    assert "2 failed" in app.screen  # below the hints
+
+    app.press("h")
+    app.wait_for(lambda: "Hints 2/2" in app.screen)
+    assert ADD_HINTS[0] in app.screen and ADD_HINTS[1] in app.screen
+
+    app.press("h")  # no hint left
+    app.quit()
+    assert app.course.hints == ADD_HINTS
+    assert "Hints 2/2" in app.screen
+
+
+def test_revealed_hints_stay_revealed(
+    hinted_app: App, exercises: tuple[Path, Path]
+) -> None:
+    app = hinted_app
+    add, _ = exercises
+    app.press("h")
+    app.wait_for(lambda: "Hints 1/2" in app.screen)
+
+    _save(add, ADD_SOLUTION)  # reruns the tests
+    app.wait_for(lambda: "2 passed" in app.screen)
+    assert "Hints 1/2" in app.screen
+
+    app.press("n", "h")  # the second task has no hints
+    app.wait_for(lambda: "Implement greet(name)." in app.screen)
+    app.wait_for(lambda: "greets failed" in app.screen)
+    assert "Hints" not in app.screen
+
+    app.press("p")
+    app.wait_for(lambda: "Implement add(a, b)." in app.screen)
+    app.wait_for(lambda: "Hints 1/2" in app.screen)
+
+
+def test_a_revealed_hint_is_scrolled_into_view(hinted_app: App) -> None:
+    app = hinted_app
+    app.resize(80, 24)  # leaves 7 lines for the main content
+    app.wait_for(lambda: "2 failed" not in app.screen)
+    app.press(DOWN, DOWN)
+    app.wait_for(lambda: app.cli.scroll_offset == 2)
+    app.press("h")
+    app.wait_for(lambda: app.cli.scroll_offset == 0)
+    app.wait_for(lambda: ADD_HINTS[0] in app.screen)
 
 
 # --- the pyics script ---

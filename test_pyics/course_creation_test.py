@@ -186,6 +186,7 @@ def test_new_task_is_not_written(
             ENTER,  # create a new task, the only option
             *_type("Task"),
             "I", "\x04",  # instructions
+            ENTER,  # add a hint: no
             *_type(str(ex)), DOWN, ENTER,  # one exercise file
             ENTER, *_type(str(sol)), DOWN, ENTER,  # add a solution file: yes, just one
             *[DOWN] * len(_TEST_TYPES), ENTER,  # no tests
@@ -204,6 +205,7 @@ def test_new_task_is_not_written(
                 "sol_files": [sol],
                 "tests": None,
                 "file_contents": {},
+                "help": [],
             },
         )
     ]

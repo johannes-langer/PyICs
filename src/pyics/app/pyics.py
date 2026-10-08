@@ -11,6 +11,7 @@ from rich.text import Text
 
 from pyics.app.actions import (
     Courses,
+    Hint,
     KeyAction,
     Next,
     Previous,
@@ -62,6 +63,8 @@ class PyIC:
         # set once the current course is entered, to draw it as a whole
         self.__entered = False
         self.__shown_check_status = ""
+        # set once a hint is revealed, to draw it
+        self.__hint_revealed = False
         # shown in the header the next time the course selector is
         self.__select_info = _SELECT_INFO
         # printed once the interface has been left (see ``scripts.main``)
@@ -179,6 +182,7 @@ class PyIC:
             Courses(pyics=self),
             ScrollUp(cli=self.cli, pyics=self),
             ScrollDown(cli=self.cli, pyics=self),
+            Hint(pyics=self),
         ]
         for a in key_actions:
             self.key_actions[a.key] = a
@@ -201,6 +205,11 @@ class PyIC:
         """
         if self.current_course is not None:
             self.current_course.next()
+
+    def reveal_hint(self) -> None:
+        """Reveal the current task's next hint, if it has one left, to be drawn."""
+        if self.current_course is not None and self.current_course.reveal_hint():
+            self.__hint_revealed = True
 
     @hey_listen("q")
     def run(self, q: queue.Queue[str]):
@@ -232,6 +241,7 @@ class PyIC:
         just been entered.
         """
         entered, self.__entered = self.__entered, False
+        hint_revealed, self.__hint_revealed = self.__hint_revealed, False
 
         if course.error is not None:
             # it can't be started, so it isn't resumed either
@@ -256,10 +266,13 @@ class PyIC:
             if entered or course.check_status != self.__shown_check_status:
                 self.__shown_check_status = course.check_status
                 self.cli.update_main_content(course.status)
-        elif new_test_results or task_changed or entered:
+        elif new_test_results or task_changed or entered or hint_revealed:
             # clear before reading the status, so results that arrive in between
             # are picked up on the next tick instead of being dropped
             course.clear_test_results()
+            if hint_revealed:
+                # the hints are shown above the test results
+                self.cli.scroll_offset = 0
             self.cli.update_main_content(
                 course.status,
                 Text(", ".join(p.as_posix() for p in course.exercise_files), style="dim"),
