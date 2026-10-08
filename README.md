@@ -34,7 +34,9 @@ When editing, confirming every prompt leaves the task or course as it was. Chang
 * The progress stored in a course follows its tasks when they are reordered or removed.
 
 
-In the top level directory, there is the ``search_course.pyicscourse.json``, which is a demo course that _should_ be found. When running the main script, it is currently automatically selected one of the two tests should be failing.
+The main app starts with a course selector, listing the course manifests found in the working directory and up to two directories below it (``.venv``, ``.git`` and the like are skipped). <kbd>c</kbd> goes back to it from a course, and <kbd>esc</kbd> from there returns to the course that was left. Courses left this way resume where they were left. Progress isn't stored in the course manifest: when a course is opened, the progress is checked from the exercise files on disk, task by task, and the course starts on the first unsolved task. Existing exercise files are never overwritten.
+
+In the top level directory, there is the ``search_course.pyicscourse.json``, which is a demo course that _should_ be found by the course selector. Once selected, one of the two tests of its first task should be failing.
 ### Repository/App Structure
 
 The ``src/pyics`` directory contains the following submodules:

@@ -9,12 +9,11 @@ from pyics.app.key_listener import KeyListener
 from pyics.app.prompts import PromptCancelled, PromptSession
 from pyics.data.task import Task
 from pyics.scripts.create_course import (
-    _TASK_SUFFIX,
-    _find_courses,
     _names_taken_elsewhere,
     _rename_in_courses,
 )
 from pyics.scripts.create_task import _task_flow
+from pyics.util.discovery import TASK_SUFFIX, find_courses
 
 
 def _edit_task(task_file: PathLike, max_depth: int = 3) -> None:
@@ -35,8 +34,8 @@ def _edit_task(task_file: PathLike, max_depth: int = 3) -> None:
         manifests, so the search stays short when run in e.g. the home directory.
     """
     task_file = Path(task_file)
-    if not task_file.name.endswith(_TASK_SUFFIX):
-        sys.exit(f"error: {task_file} is not a task file (*{_TASK_SUFFIX})")
+    if not task_file.name.endswith(TASK_SUFFIX):
+        sys.exit(f"error: {task_file} is not a task file (*{TASK_SUFFIX})")
     try:
         current = Task.read_task_json(task_file)
     except Exception as err:  # noqa: BLE001
@@ -51,7 +50,7 @@ def _edit_task(task_file: PathLike, max_depth: int = 3) -> None:
 
     try:
         # searched once up front, since the flow is replayed whenever the user goes back
-        courses = _find_courses(Path.cwd(), max_depth)
+        courses = find_courses(Path.cwd(), max_depth)
         taken = _names_taken_elsewhere(task_file, courses)
         info = f"Editing the task {escape(str(current['name']))}..."
         cli.update_info(info)

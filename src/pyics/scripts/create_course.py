@@ -1,8 +1,7 @@
-import os
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from os import PathLike
-from pathlib import Path, PurePath
+from pathlib import Path
 from typing import Any, NamedTuple
 
 from rich.console import Group
@@ -24,23 +23,10 @@ from pyics.data.course import Course
 from pyics.data.task import Task
 from pyics.scripts.create_task import _EDIT, _KEEP, _REMOVE, _check_name, _task_flow
 from pyics.util import paths
-from pyics.util.logging import get_logger
+from pyics.util.discovery import TASK_SUFFIX, find_task_files
 
 _TOTAL_STEPS = 3
 _INFO = "Creating a new course..."
-
-_TASK_SUFFIX = ".pyicstask.json"
-_COURSE_SUFFIX = ".pyicscourse.json"
-# never searched for task files: large, and never contain any
-_SKIP_DIRS = {
-    ".git",
-    ".venv",
-    "venv",
-    "node_modules",
-    "__pycache__",
-    ".pytest_cache",
-    ".ruff_cache",
-}
 
 _ADD_EXISTING = "Add an existing task"
 _ADD_NEW = "Create a new task"
@@ -73,70 +59,6 @@ class _CourseTask(NamedTuple):
     problem: str = ""
 
 
-def _find_files(root: Path, max_depth: int, suffix: str) -> Iterator[Path]:
-    """The files whose names end in ``suffix`` at most ``max_depth`` directories below
-    ``root``, skipping ``_SKIP_DIRS``, relative to ``root``."""
-    for dirpath, dirnames, filenames in os.walk(root):
-        rel = Path(dirpath).relative_to(root)
-        if len(rel.parts) >= max_depth:
-            dirnames.clear()
-        else:
-            dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
-        for filename in sorted(filenames):
-            if filename.endswith(suffix):
-                yield rel / filename
-
-
-def _find_task_files(root: Path, max_depth: int) -> dict[Path, str]:
-    """
-    Find task files at most ``max_depth`` directories below ``root``, skipping
-    ``_SKIP_DIRS``. Files that can't be read or have no task name are skipped.
-
-    Returns
-    -------
-    dict[Path, str]
-        The task files' paths, relative to ``root``, mapped to their task names.
-    """
-    found: dict[Path, str] = {}
-    for rel in _find_files(root, max_depth, _TASK_SUFFIX):
-        try:
-            with open(root / rel, encoding="utf-8") as f:
-                name = json.load(f)["name"]
-        except Exception:  # noqa: BLE001
-            get_logger(__name__).debug(f"Skipping {root / rel}", exc_info=True)
-            continue
-        if isinstance(name, str):
-            found[rel] = name
-    return found
-
-
-def _find_courses(root: Path, max_depth: int) -> dict[Path, dict[str, Any]]:
-    """
-    Find course manifests at most ``max_depth`` directories below ``root``, skipping
-    ``_SKIP_DIRS``. Files that can't be read or have no tasks are skipped.
-
-    Returns
-    -------
-    dict[Path, dict[str, Any]]
-        The manifests' absolute paths, mapped to their contents.
-    """
-    found: dict[Path, dict[str, Any]] = {}
-    for rel in _find_files(root, max_depth, _COURSE_SUFFIX):
-        path = paths.absolute(root / rel)
-        try:
-            with open(path, encoding="utf-8") as f:
-                manifest = json.load(f)
-            tasks = manifest["tasks"]
-        except Exception:  # noqa: BLE001
-            get_logger(__name__).debug(f"Skipping {path}", exc_info=True)
-            continue
-        if isinstance(tasks, dict) and all(
-            isinstance(v, (str, PurePath)) for v in tasks.values()
-        ):
-            found[path] = manifest
-    return found
-
-
 def _course_tasks(fp: Path, manifest: Mapping[str, Any]) -> dict[str, Path]:
     """The tasks of the course ``manifest`` read from ``fp``, by name, with their task
     files' absolute paths."""
@@ -149,7 +71,7 @@ def _course_tasks(fp: Path, manifest: Mapping[str, Any]) -> dict[str, Path]:
 def _names_taken_elsewhere(
     task_file: PathLike, courses: Mapping[Path, Mapping[str, Any]]
 ) -> frozenset[str]:
-    """The names of the other tasks in the ``courses`` (see ``_find_courses``) that
+    """The names of the other tasks in the ``courses`` (see ``find_courses``) that
     include ``task_file``, which the task can't be renamed to."""
     task = paths.absolute(task_file)
     taken: set[str] = set()
@@ -164,7 +86,7 @@ def _rename_in_courses(
     task_file: PathLike, name: str, courses: dict[Path, dict[str, Any]]
 ) -> list[Path]:
     """
-    Rename the task ``task_file`` to ``name`` in the ``courses`` (see ``_find_courses``)
+    Rename the task ``task_file`` to ``name`` in the ``courses`` (see ``find_courses``)
     that include it under another name, keeping its position in them, and rewrite their
     manifests. ``courses`` is updated to match.
 
@@ -294,7 +216,7 @@ def _prompt_tasks(
 
         fields = _task_flow(s, taken_names=tasks)
         prompt = PathInput(
-            "Task file path", initial=f"./{fields['name']}{_TASK_SUFFIX}"
+            "Task file path", initial=f"./{fields['name']}{TASK_SUFFIX}"
         )
         tasks[fields["name"]] = (s.ask(prompt, lambda p: _check_path(p, tasks)), fields)
 
@@ -356,7 +278,7 @@ def _create_course(fp: PathLike | None = None, max_depth: int = 3) -> None:
 
     try:
         # searched once up front, since the flow is replayed whenever the user goes back
-        found = _find_task_files(Path.cwd(), max_depth)
+        found = find_task_files(Path.cwd(), max_depth)
         cli.update_info(_INFO)
 
         with KeyListener() as q:

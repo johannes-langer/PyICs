@@ -4,7 +4,7 @@ import sys
 
 import jsonargparse
 
-from pyics.app.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI
+from pyics.app.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI, SHOW_CURSOR
 from pyics.util.logging import setup_logging
 from pyics.app.pyics import PyIC
 from pyics.scripts.create_course import _create_course
@@ -32,9 +32,15 @@ def main(*, log_level: str | int = 50, log_file: PathLike = Path("./.pyics.log")
 
     try:
         pyics()
+        pyics.thread.join()
     finally:
+        cli.stop()
+        sys.stdout.write(SHOW_CURSOR)
         sys.stdout.write(ALT_SCREEN_LEAVE)
         sys.stdout.flush()
+    # after leaving the alternate screen, so that it stays visible
+    if pyics.exit_message:
+        print(pyics.exit_message)
 
 
 # Subcommands of the ``pyics`` script, run as e.g. ``pyics create_task``. Without one,
