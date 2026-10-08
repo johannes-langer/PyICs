@@ -194,16 +194,17 @@ def _complete_path(text: str) -> tuple[str, list[str]]:
     -------
     tuple[str, list[str]]
         The path extended to the longest common prefix of its matches, and the matching
-        names to show if there are several (directories suffixed with ``/``).
+        names to show if there are several (directories suffixed with ``/``). Matches are
+        separated by ``/``, which Windows accepts as well.
     """
     text = os.path.expanduser(text)
     matches = [
-        m + "/" if os.path.isdir(m) else m
+        m.replace(os.sep, "/") + ("/" if os.path.isdir(m) else "")
         for m in sorted(glob.glob(glob.escape(text) + "*"))
     ]
     if len(matches) <= 1:
         return (matches[0] if matches else text), []
-    head = text[: text.rfind("/") + 1]
+    head = text[: max(text.rfind("/"), text.rfind(os.sep)) + 1]
     return os.path.commonprefix(matches), [m[len(head) :] for m in matches]
 
 

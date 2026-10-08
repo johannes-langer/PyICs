@@ -2,6 +2,7 @@
 Tab completion of file paths in ``PathInput`` prompts.
 """
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -37,7 +38,7 @@ def test_ambiguous_extends_to_common_prefix(tree: Path) -> None:
 
 
 def test_absolute_dir_is_kept(tree: Path) -> None:
-    assert _complete_path(f"{tree}/so") == (f"{tree}/solution.py", [])
+    assert _complete_path(f"{tree}/so") == (f"{tree.as_posix()}/solution.py", [])
 
 
 def test_dotfiles_hidden_unless_prefix_is_dot(tree: Path) -> None:
@@ -52,7 +53,15 @@ def test_no_match_or_missing_dir_is_unchanged(tree: Path) -> None:
 
 def test_home_is_expanded(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tree))
-    assert _complete_path("~/sol") == (f"{tree}/solution.py", [])
+    monkeypatch.setenv("USERPROFILE", str(tree))  # read instead on Windows
+    assert _complete_path("~/sol") == (f"{tree.as_posix()}/solution.py", [])
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="only Windows separates with \\")
+def test_backslashes_separate_paths_on_windows(tree: Path) -> None:
+    assert _complete_path("tasks\\i") == ("tasks/inner.py", [])
+    (tree / "tasks" / "other.py").touch()
+    assert _complete_path("tasks\\") == ("tasks/", ["inner.py", "other.py"])
 
 
 def test_path_input_candidates_cleared_on_typing(tree: Path) -> None:
