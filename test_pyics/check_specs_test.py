@@ -102,6 +102,56 @@ def test_nested_class():
     assert "alias" not in spec
 
 
+class Base:
+    x: int
+
+    class Inner:
+        z: int
+
+    def __init__(self, x: int, y: str):
+        self.x = x
+        self.y = y
+
+    def shared(self) -> int:
+        return 1
+
+    def replaced(self) -> int:
+        return 1
+
+    def hidden(self) -> int:
+        return 1
+
+    @property
+    def p(self) -> int:
+        return 1
+
+
+class Child(Base):
+    hidden = None
+
+    def own(self) -> None: ...
+
+    def replaced(self, factor: float) -> float:
+        return factor
+
+
+def test_inherited_members_to_dict():
+    spec = to_spec_dict(Child)
+    assert spec["x"] == "int"
+    assert spec["y"] is None
+    assert spec["__init__"] == to_spec_dict(Base)["__init__"]
+    assert spec["shared"] == {"is_class": False, "return": "int"}
+    assert spec["p"] == to_spec_dict(Base)["p"]
+    assert spec["own"] == {"is_class": False, "return": "None"}
+    assert spec["Inner"] == {"is_class": True, "z": "int"}
+
+
+def test_overridden_member_wins():
+    spec = to_spec_dict(Child)
+    assert spec["replaced"] == {"is_class": False, "factor": "float", "return": "float"}
+    assert "hidden" not in spec
+
+
 def test_spec_is_json_serializable():
     spec = to_spec_dict(Node)
     assert json.loads(json.dumps(spec)) == spec
@@ -210,6 +260,25 @@ def test_class_differences():
         "Missing method: 'make'.",
         "Method 'root': Return value is missing its type hint.",
     ]
+
+
+def test_inherited_spec_matches():
+    spec = {
+        k: v for k, v in to_spec_dict(Base).items() if k not in ("replaced", "hidden")
+    }
+    assert _compare(spec, Child) == []
+    assert _compare(Child, Child, exact=True) == []
+
+
+def test_implicit_init():
+    class Plain:
+        pass
+
+    init = {"is_class": False, "return": None}
+    assert _compare({"is_class": True, "__init__": init}, Plain, exact=True) == []
+    assert _compare(
+        {"is_class": True, "__init__": {**init, "x": "int"}}, Plain, exact=True
+    ) == ["Method '__init__': Missing parameter: 'x'."]
 
 
 def test_property_differences():
@@ -372,3 +441,40 @@ def test_spec_test_json_round_trip(tmp_path: Path, by_type: bool):
     solution.write_text(SOLUTION.replace("times: int", "times: float"))
     with pytest.raises(AssertionError, match=r"Method \[b\]'add'"):
         loaded.run()
+
+
+FLAT_SOLUTION = """
+class Child:
+    x: int
+
+    class Inner:
+        z: int
+
+    def __init__(self, x: int, y: str):
+        self.x = x
+        self.y = y
+
+    def shared(self) -> int:
+        return 1
+
+    def replaced(self, factor: float) -> float:
+        return factor
+
+    @property
+    def p(self) -> int:
+        return 1
+
+    def own(self) -> None: ...
+"""
+
+
+def test_spec_test_with_inheritance(tmp_path: Path):
+    solution = tmp_path / "solution.py"
+    solution.write_text(FLAT_SOLUTION)
+
+    test = json.loads(json.dumps(SpecTest("spec", solution, "Child", Child)))
+    test.run()
+
+    solution.write_text(FLAT_SOLUTION.replace("def shared", "def other"))
+    with pytest.raises(AssertionError, match=r"Missing method: \[b\]'shared'"):
+        test.run()
