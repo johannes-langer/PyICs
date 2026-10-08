@@ -132,6 +132,7 @@ def test_check_file_expands_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))  # read instead on Windows
     (tmp_path / "ex.py").touch()
     assert _check_file("~/ex.py") == tmp_path / "ex.py"
 
