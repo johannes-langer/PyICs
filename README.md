@@ -10,6 +10,10 @@ PyICs is a framework for interactive Python tutorials, inspired by the _rustling
 
 _The ``PyICs`` app is currently still in development an not ready to be used._
 
+### Platform Support
+
+PyICs runs in the terminal on Linux, macOS and Windows 10 or later. On Windows, [Windows Terminal](https://aka.ms/terminal) is recommended.
+
 ## Development Notes
 
 > This project is managed using ``uv``. After cloning the repository, run ``uv sync`` at the top level to create a virtual environment with the required packages installed.

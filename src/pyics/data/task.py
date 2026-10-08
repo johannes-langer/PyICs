@@ -3,8 +3,6 @@ import os
 from collections.abc import Mapping
 from os import PathLike
 from pathlib import Path
-import sys
-import termios
 import threading
 from typing import Any, Union
 
@@ -16,7 +14,7 @@ from rich.table import Table
 from rich.text import Text
 
 import pyics.util.json_handling as json
-from pyics.util import paths
+from pyics.util import paths, terminal
 from pyics.util.logging import get_logger
 from pyics.tests import Test
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin
@@ -303,22 +301,8 @@ class Task:
             self._tests_pending = False
             plugin = LiveTestCollectionPlugin(self.tests)
 
-            with _pytest_lock:
-                try:
-                    tty_attrs = termios.tcgetattr(sys.stdin.fileno())
-                except termios.error, ValueError:
-                    tty_attrs = None
-
-                try:
-                    pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
-                finally:
-                    if tty_attrs is not None:
-                        try:
-                            termios.tcsetattr(
-                                sys.stdin.fileno(), termios.TCSANOW, tty_attrs
-                            )
-                        except termios.error:
-                            pass
+            with _pytest_lock, terminal.preserve_terminal_mode():
+                pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
 
             self.test_results = plugin.reports
             self.__tested = True

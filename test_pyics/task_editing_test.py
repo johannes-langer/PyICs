@@ -310,7 +310,7 @@ def test_values_without_a_python_repr_are_prefilled_by_reference(
         task_file,
     )  # fmt: skip
     assert fields["tests"][0].function_args == [Path("a")]
-    assert "current = [PosixPath('a')]" in _shown(s, "function_args")
+    assert f"current = [{Path('a')!r}]" in _shown(s, "function_args")
 
 
 def test_strings_are_prefilled_despite_test_information(task_file: Path) -> None:

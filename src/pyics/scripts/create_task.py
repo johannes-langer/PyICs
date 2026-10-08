@@ -3,7 +3,6 @@ import copy
 import difflib
 import inspect
 import reprlib
-import sys
 from collections.abc import Collection, Mapping
 from os import PathLike
 from pathlib import Path, PurePath
@@ -16,7 +15,7 @@ from rich.syntax import Syntax
 from rich.text import Text
 
 import pyics.util.json_handling as json
-from pyics.app.cli import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, CLI, SHOW_CURSOR
+from pyics.app.cli import CLI
 from pyics.app.key_listener import KeyListener
 from pyics.app.prompts import (
     CodeInput,
@@ -30,6 +29,7 @@ from pyics.data.task import Task
 from pyics.tests import Test, check_specs, check_structure
 from pyics.tests.tests import PrintTest, SimpleTest, SpecTest, StructureTest
 from pyics.util import paths
+from pyics.util.terminal import fullscreen
 
 _TOTAL_STEPS = 5
 _INFO = "Creating a new task..."
@@ -518,25 +518,20 @@ def _create_task(fp: PathLike | None = None) -> None:
     fp: PathLike
         Output path for the resulting ``.pyicstask.json`` file.
     """
-    sys.stdout.write(ALT_SCREEN_ENTER)
-    sys.stdout.flush()
+    with fullscreen():
+        cli = CLI()
+        cli()
+        cli.update_info(_INFO)
 
-    cli = CLI()
-    cli()
-    cli.update_info(_INFO)
+        try:
+            with KeyListener() as q:
+                fields = PromptSession(cli, q, info=_INFO).run(_task_flow)
 
-    try:
-        with KeyListener() as q:
-            fields = PromptSession(cli, q, info=_INFO).run(_task_flow)
-
-        if not fp:
-            fp = Path(f"./{fields['name']}")
-        fp = Task.create_task_json(fp, **fields)
-        cli.update_info(f"Task written to {escape(str(fp))}")
-    except PromptCancelled:
-        cli.update_info("Cancelled, no task was created.")
-    finally:
-        cli.running = False
-        sys.stdout.write(SHOW_CURSOR)
-        sys.stdout.write(ALT_SCREEN_LEAVE)
-        sys.stdout.flush()
+            if not fp:
+                fp = Path(f"./{fields['name']}")
+            fp = Task.create_task_json(fp, **fields)
+            cli.update_info(f"Task written to {escape(str(fp))}")
+        except PromptCancelled:
+            cli.update_info("Cancelled, no task was created.")
+        finally:
+            cli.stop()
