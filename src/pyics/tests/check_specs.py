@@ -221,13 +221,9 @@ def _class_to_dict(cls: type) -> SpecDict:
 
     # attributes: annotated ones and those assigned in methods, incl. inherited ones
     hints = typing.get_type_hints(cls, format=annotationlib.Format.FORWARDREF)
-    static = [
-        a for k in reversed(bases) for a in getattr(k, "__static_attributes__", ())
-    ]
+    static = [a for k in reversed(bases) for a in getattr(k, "__static_attributes__", ())]
     for name in dict.fromkeys([*hints, *static]):
-        spec[name] = _format_type(
-            hints.get(name, inspect.Parameter.empty), cls.__module__
-        )
+        spec[name] = _format_type(hints.get(name, inspect.Parameter.empty), cls.__module__)
 
     # methods, properties and nested classes, incl. inherited ones. The most derived
     # definition of a name wins, even if it is no method (e.g. ``method = None``)
@@ -241,9 +237,10 @@ def _class_to_dict(cls: type) -> SpecDict:
 
             if isinstance(member, staticmethod):
                 spec[name] = _func_to_dict(member.__func__, module)
-            elif isinstance(member, classmethod) or inspect.isfunction(member):
-                func = getattr(member, "__func__", member)
-                spec[name] = _func_to_dict(func, module, drop_first=True)
+            elif isinstance(member, classmethod):
+                spec[name] = _func_to_dict(member.__func__, module, drop_first=True)
+            elif inspect.isfunction(member):
+                spec[name] = _func_to_dict(member, module, drop_first=True)
             elif isinstance(member, property):
                 spec[name] = _property_to_dict(member, module)
             elif (
@@ -289,9 +286,7 @@ def _validate(spec: SpecDict, path: str) -> None:
             _validate(value, sub_path)
         elif isinstance(value, dict):
             if unknown := value.keys() - _PARAM_KEYS:
-                raise ValueError(
-                    f"{sub_path}: unknown parameter keys {sorted(unknown)}."
-                )
+                raise ValueError(f"{sub_path}: unknown parameter keys {sorted(unknown)}.")
             kind = value.get("kind", _POK.name)
             if not isinstance(kind, str) or kind.upper() not in _KINDS:
                 raise ValueError(f"{sub_path}: kind must be one of {list(_KINDS)}.")
@@ -391,12 +386,8 @@ def _match_by_type(
 
 
 def _compare_func(exp: SpecDict, oth: SpecDict, o: _Options) -> list[str]:
-    exp_params = {
-        n: _param(v) for n, v in exp.items() if n not in ("is_class", "return")
-    }
-    oth_params = {
-        n: _param(v) for n, v in oth.items() if n not in ("is_class", "return")
-    }
+    exp_params = {n: _param(v) for n, v in exp.items() if n not in ("is_class", "return")}
+    oth_params = {n: _param(v) for n, v in oth.items() if n not in ("is_class", "return")}
 
     if o.by_type:
         diffs = _match_by_type(
@@ -458,9 +449,7 @@ def _compare_params_by_name(
 
 
 def _compare_property(exp: SpecDict, oth: SpecDict, o: _Options) -> list[str]:
-    diffs = _compare_type(
-        "Getter return value", exp.get("return"), oth.get("return"), o
-    )
+    diffs = _compare_type("Getter return value", exp.get("return"), oth.get("return"), o)
     for key in ("setter", "deleter"):
         if exp.get(key) and not oth.get(key):
             diffs.append(f"Missing {key}.")

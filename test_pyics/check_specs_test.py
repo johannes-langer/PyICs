@@ -127,11 +127,11 @@ class Base:
 
 
 class Child(Base):
-    hidden = None
+    hidden = None  # pyright: ignore[reportAssignmentType] - a method replaced by no method
 
     def own(self) -> None: ...
 
-    def replaced(self, factor: float) -> float:
+    def replaced(self, factor: int = 1) -> int:
         return factor
 
 
@@ -148,7 +148,11 @@ def test_inherited_members_to_dict():
 
 def test_overridden_member_wins():
     spec = to_spec_dict(Child)
-    assert spec["replaced"] == {"is_class": False, "factor": "float", "return": "float"}
+    assert spec["replaced"] == {
+        "is_class": False,
+        "factor": {"type": "int", "default": 1},
+        "return": "int",
+    }
     assert "hidden" not in spec
 
 
@@ -175,7 +179,7 @@ def test_invalid_spec_dicts(spec):
 
 def test_invalid_spec_type():
     with pytest.raises(TypeError):
-        to_spec_dict(3)
+        to_spec_dict(3)  # pyright: ignore[reportArgumentType]
 
 
 # named comparison #####################################################################
@@ -457,7 +461,7 @@ class Child:
     def shared(self) -> int:
         return 1
 
-    def replaced(self, factor: float) -> float:
+    def replaced(self, factor: int = 1) -> int:
         return factor
 
     @property

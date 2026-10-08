@@ -287,7 +287,7 @@ def app(exercises: tuple[Path, Path], launch: Callable[[], App]) -> App:
 def test_startup_shows_the_first_task(app: App, exercises: tuple[Path, Path]) -> None:
     add, _ = exercises
     assert app.cli.info_text == "Implement add(a, b)."
-    assert app.cli.main_title.plain == add.as_posix()
+    assert str(app.cli.main_title) == add.as_posix()
     assert app.cli.percentage == 0
     shown = [
         "Implement add(a, b).",  # header
@@ -327,7 +327,7 @@ def test_next_and_previous_move_between_tasks_once_solved(
     app.press("n")
     app.wait_for(lambda: "Implement greet(name)." in app.screen)
     app.wait_for(lambda: "greets failed: '' == 'Hello, World!'" in app.screen)
-    assert app.cli.main_title.plain == greet.as_posix()
+    assert str(app.cli.main_title) == greet.as_posix()
 
     app.press("p")
     app.wait_for(lambda: "Implement add(a, b)." in app.screen)
@@ -460,7 +460,7 @@ def test_a_single_course_is_offered(
     app.press(ENTER)
     app.wait_for(lambda: "2 failed" in app.screen)
     assert app.cli.info_text == "Implement add(a, b)."
-    assert app.cli.main_title.plain == add.as_posix()
+    assert str(app.cli.main_title) == add.as_posix()
 
 
 def test_selecting_one_of_several_courses(

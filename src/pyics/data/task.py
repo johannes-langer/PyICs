@@ -1,6 +1,6 @@
 import copy
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from os import PathLike
 from pathlib import Path
 import threading
@@ -15,6 +15,7 @@ from rich.text import Text
 
 import pyics.util.json_handling as json
 from pyics.util import paths, terminal
+from pyics.util.paths import StrPath
 from pyics.util.logging import get_logger
 from pyics.tests import Test
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin, RichFailureRepr
@@ -41,6 +42,15 @@ def _failure_text(report: pytest.TestReport) -> Text:
     return Text(report.longreprtext)
 
 
+def _path_list(files: StrPath | Sequence[StrPath] | None) -> list[StrPath]:
+    """``files`` as a list of paths, whether given as one path, several or None."""
+    if files is None:
+        return []
+    if isinstance(files, (str, PathLike)):
+        return [files]
+    return list(files)
+
+
 class Task:
     """Unified Task Representation"""
 
@@ -49,7 +59,7 @@ class Task:
     __solved: bool = False
     __new_test_results: bool = False
 
-    def __init__(self, task_file: PathLike, *, setup: bool = True):
+    def __init__(self, task_file: StrPath, *, setup: bool = True):
         """
         Parses a task from a task json-file.
 
@@ -58,7 +68,7 @@ class Task:
 
         Parameters
         ----------
-        task_file: PathLike
+        task_file: StrPath
             Path to the task file
         setup: bool (optional, keyword only)
             Create the task's files and run its tests (see ``setup``). Default is True.
@@ -153,7 +163,7 @@ class Task:
         self.__new_test_results = False
 
     @property
-    def path(self) -> PathLike:
+    def path(self) -> StrPath:
         return self.__path
 
     @property
@@ -363,7 +373,7 @@ class Task:
             fp.write_text(code, encoding="utf-8")
 
     @staticmethod
-    def read_task_json(fp: PathLike) -> dict[str, Any]:
+    def read_task_json(fp: StrPath) -> dict[str, Any]:
         """
         Read a task file without loading the task, i.e. without creating its files or
         running its tests. Inverse of ``create_task_json``: returns its keyword
@@ -375,7 +385,7 @@ class Task:
 
         Parameters
         ----------
-        fp: PathLike
+        fp: StrPath
             Path to the task file
 
         Returns
@@ -411,13 +421,13 @@ class Task:
 
     @staticmethod
     def create_task_json(
-        fp: PathLike,
+        fp: StrPath,
         name: str,
         instructions: str,
-        ex_files: Union[PathLike, list[PathLike], None] = None,
-        sol_files: Union[PathLike, list[PathLike], None] = None,
+        ex_files: StrPath | Sequence[StrPath] | None = None,
+        sol_files: StrPath | Sequence[StrPath] | None = None,
         tests: Union[Test, list[Test], None] = None,
-        file_contents: Mapping[PathLike, str] | None = None,
+        file_contents: Mapping[StrPath, str] | None = None,
     ) -> Path:
         """
         Create a task_json from all relevant information as it would naturally be available
@@ -430,19 +440,19 @@ class Task:
 
         Parameters
         ----------
-        fp: PathLike
+        fp: StrPath
             Desired output path
         name: str
             Name of the task
         instructions: str
             Instructions for the task
-        ex_files: Union[str, Path, list[str | Path]]
+        ex_files: StrPath | Sequence[StrPath] | None
             Filename or list of filenames of exercise files.
-        sol_files: Union[str, Path, list[str | Path]]
+        sol_files: StrPath | Sequence[StrPath] | None
             Filename or list of filenames of solution files.
         tests: Union[Test, list[Test]]
             Filename or list of filenames containing serialized tests
-        file_contents: Mapping[PathLike, str] | None
+        file_contents: Mapping[StrPath, str] | None
             Contents to store for some of the exercise and solution files, by path,
             instead of reading these files, e.g. the contents already stored in the task
             file when editing it (see ``read_task_json``). Other files are read.
@@ -460,26 +470,14 @@ class Task:
         task["name"] = name
         task["instructions"] = instructions
 
-        ex_files = (
-            ex_files
-            if isinstance(ex_files, list)
-            else [ex_files]
-            if ex_files is not None
-            else []
-        )
-        sol_files = (
-            sol_files
-            if isinstance(sol_files, list)
-            else [sol_files]
-            if sol_files is not None
-            else []
-        )
+        ex_files = _path_list(ex_files)
+        sol_files = _path_list(sol_files)
         task["ex_files"] = [paths.relative_to(f, base) for f in ex_files]
         task["sol_files"] = [paths.relative_to(f, base) for f in sol_files]
 
         contents = {paths.absolute(f): c for f, c in (file_contents or {}).items()}
 
-        def read(f: PathLike) -> str:
+        def read(f: StrPath) -> str:
             if (key := paths.absolute(f)) in contents:
                 return contents[key]
             return Path(f).read_text(encoding="utf-8")
@@ -517,6 +515,6 @@ class Task:
         # isn't left empty if serializing fails
         text = json.dumps(task, indent=4)
         with open(fp, "w", encoding="utf-8") as f:
-            f.write(text)  # pyright: ignore[reportArgumentType]
+            f.write(text)
 
         return fp

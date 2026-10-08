@@ -89,6 +89,12 @@ def _session(keys: list[str]) -> PromptSession:
     return PromptSession(MagicMock(), q)
 
 
+def _cli(s: PromptSession) -> MagicMock:
+    """The mock standing in for the CLI of the session."""
+    assert isinstance(s.cli, MagicMock)
+    return s.cli
+
+
 def _edit(
     keys: list[str],
     course_file: Path,
@@ -106,7 +112,7 @@ def _edit(
 
 def _shown(s: PromptSession, title: str) -> str:
     """The text of the last prompt with the label ``title``, as the CLI shows it."""
-    calls = s.cli.update_main_content.call_args_list
+    calls = _cli(s).update_main_content.call_args_list
     renderable = next(c.args[0] for c in reversed(calls) if c.kwargs["title"] == title)
     console = Console(width=100, record=True, file=io.StringIO())
     console.print(renderable)
@@ -114,7 +120,7 @@ def _shown(s: PromptSession, title: str) -> str:
 
 
 def _info(s: PromptSession) -> list[str]:
-    return [c.args[0] for c in s.cli.update_info.call_args_list]
+    return [c.args[0] for c in _cli(s).update_info.call_args_list]
 
 
 def _run_script(

@@ -4,6 +4,7 @@ from fractions import Fraction
 from datetime import date, time, datetime, timedelta
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import json_tricks
 
@@ -65,9 +66,13 @@ def _untag_tuples(dct):
     return dct
 
 
-def dumps(obj, **kw):
-    """Wrapper around ``json_tricks.dumps`` to tag tuples early."""
-    return json_tricks.dumps(_tag_tuples(obj), **kw)
+def dumps(obj: Any, **kw: Any) -> str:
+    """Wrapper around ``json_tricks.dumps`` to tag tuples early. Compression isn't
+    supported, since its result is bytes."""
+    txt = json_tricks.dumps(_tag_tuples(obj), **kw)
+    if not isinstance(txt, str):
+        raise TypeError("compressed output isn't supported, use json_tricks directly")
+    return txt
 
 
 def dump(obj, fp, **kw):

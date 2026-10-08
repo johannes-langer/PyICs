@@ -31,6 +31,12 @@ def _session(keys: list[str]) -> PromptSession:
     return PromptSession(MagicMock(), q)
 
 
+def _cli(s: PromptSession) -> MagicMock:
+    """The mock standing in for the CLI of the session."""
+    assert isinstance(s.cli, MagicMock)
+    return s.cli
+
+
 def _run(keys: list[str], found: dict[Path, str]) -> dict[str, Any]:
     s = _session(keys)
     fields = s.run(lambda s: _course_flow(s, found))
@@ -155,7 +161,7 @@ def test_done_not_offered_without_tasks() -> None:
     s = _session([*_type("Course"), DOWN, ENTER])  # only "create a new task" is offered
     with pytest.raises(PromptCancelled):
         s.run(lambda s: _course_flow(s, {}))
-    assert s.cli.update_main_content.call_args.kwargs["title"] == "Task name"
+    assert _cli(s).update_main_content.call_args.kwargs["title"] == "Task name"
 
 
 def test_duplicate_task_name_is_rejected() -> None:
@@ -163,7 +169,7 @@ def test_duplicate_task_name_is_rejected() -> None:
     s = _session([*_type("Course"), ENTER, ENTER, ENTER, ENTER])
     with pytest.raises(PromptCancelled):
         s.run(lambda s: _course_flow(s, found))
-    info = [c.args[0] for c in s.cli.update_info.call_args_list]
+    info = [c.args[0] for c in _cli(s).update_info.call_args_list]
     assert any("the course already has a task named 'A'" in i for i in info)
 
 

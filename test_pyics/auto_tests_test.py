@@ -287,7 +287,7 @@ def test_print_running_out_of_inputs_fails(tmp_path: Path, inputs: list[str]) ->
 
 def test_print_inputs_must_be_a_list(script: Path) -> None:
     with pytest.raises(TypeError, match="list"):
-        PrintTest("t", script, "", inputs="Bob")
+        PrintTest("t", script, "", inputs="Bob")  # pyright: ignore[reportArgumentType]
 
 
 def test_print_captures_only_its_own_thread(

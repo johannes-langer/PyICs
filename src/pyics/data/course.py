@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from fractions import Fraction
-from os import PathLike
 import os
 import threading
 from pathlib import Path
@@ -13,6 +13,7 @@ from rich.text import Text
 from pyics.data.task import Task
 from pyics.util import json_handling as json
 from pyics.util import paths
+from pyics.util.paths import StrPath
 from pyics.util.logging import get_logger
 
 
@@ -23,13 +24,13 @@ class Course:
     """
 
     name: str
-    tasks: dict[str, PathLike]
+    tasks: dict[str, StrPath]
 
     def __init__(
         self,
         *,
         name: str,
-        tasks: dict[str, PathLike],
+        tasks: dict[str, StrPath],
         progress: list[int],
         check_progress: bool = False,
     ) -> None:
@@ -38,7 +39,7 @@ class Course:
         ----------
         name: str
             Name of the course.
-        tasks: dict[str, PathLike]
+        tasks: dict[str, StrPath]
             Ordered mapping of task names to task files.
         progress: list[int]
             Progress of each task (1 if solved), in the order of ``tasks``.
@@ -196,7 +197,7 @@ class Course:
         """The current task's position in the course."""
         assert self.__current_task is not None
         return self.__tasks_list.index(
-            {v: k for k, v in self.tasks.items()}.get(self.__current_task.path)  # pyright: ignore[reportArgumentType]
+            {v: k for k, v in self.tasks.items()}[self.__current_task.path]
         )
 
     def next(self) -> Task | None:
@@ -294,14 +295,14 @@ class Course:
         return (self.__current_task.new_test_results, new_progress)
 
     @classmethod
-    def load_course_manifest(cls, fp: PathLike, *, check_progress: bool = False) -> Course:
+    def load_course_manifest(cls, fp: StrPath, *, check_progress: bool = False) -> Course:
         """
         Load a course manifest to a ``Course`` object. Task file paths in the manifest
         are relative to the manifest's directory (see ``create_course_manifest``).
 
         Parameters
         ----------
-        fp: PathLike
+        fp: StrPath
             Path to the manifest
         check_progress: bool (optional, keyword only)
             Check the progress from the exercise files on disk (see ``Course``). Default
@@ -322,8 +323,8 @@ class Course:
 
     @staticmethod
     def create_course_manifest(
-        fp: PathLike,
-        task_files: list[PathLike],
+        fp: StrPath,
+        task_files: Sequence[StrPath],
         *,
         name: Optional[str] = None,
         use_task_names: bool = True,
@@ -336,10 +337,10 @@ class Course:
 
         Parameters
         ----------
-        fp: PathLike
+        fp: StrPath
             Path to the course manifest. Should have the suffix '.pyicscourse.json'. If
             it doesn't, makes changes to the suffix and logs (if logging is active).
-        task_files: list[PathLike]
+        task_files: Sequence[StrPath]
             List of task files to compose the course. Order is relevant. Given relative
             to the working directory (or absolute), and stored relative to the directory
             of the manifest, so the course keeps working when it is moved together with
@@ -384,7 +385,7 @@ class Course:
 
         if use_task_names:
 
-            def get_task_name(fp: PathLike) -> str:
+            def get_task_name(fp: StrPath) -> str:
                 with open(fp, "r", encoding="utf-8") as f:
                     name = json.load(f)["name"]
                 return name
@@ -414,6 +415,6 @@ class Course:
         text = json.dumps(manifest, indent=4)
         os.makedirs(fp.parent, exist_ok=True)
         with open(fp, "w", encoding="utf-8") as f:
-            f.write(text)  # pyright: ignore[reportArgumentType]
+            f.write(text)
 
         return fp

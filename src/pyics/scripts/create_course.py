@@ -129,7 +129,7 @@ def _prompt_task_file(
     return s.ask(SelectInput("Task file", list(labels)), check)
 
 
-def _check_path(raw: str, tasks: dict[str, _Entry]) -> Path:
+def _check_path(raw: str, tasks: Mapping[str, _Entry]) -> Path:
     """Return ``raw`` as a path if a new task file can be written there, raise
     otherwise."""
     path = Path(raw)

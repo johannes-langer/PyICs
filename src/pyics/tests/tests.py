@@ -3,15 +3,15 @@ import importlib.util as iutil
 import sys
 from abc import ABC, abstractmethod
 from importlib.machinery import ModuleSpec
-from os import PathLike
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Protocol
+from typing import Any, Protocol, Self
 
 from _pytest.assertion.util import assertrepr_compare, dummy_highlighter
 
 import pyics.util.json_handling as json
 from pyics.tests.capture import capture_stdout, provide_input
+from pyics.util.paths import StrPath
 from . import check_specs, check_structure
 
 
@@ -26,13 +26,13 @@ class Test(ABC):
     """Base Class for Tests"""
 
     name: str
-    file_path: PathLike
+    file_path: StrPath
 
     @abstractmethod
     def __init__(self): ...
 
     @classmethod
-    def from_dict(cls, test_dict: dict) -> "Test":
+    def from_dict(cls, test_dict: dict) -> Self:
         return cls(**test_dict)
 
     def __call__(self) -> None:
@@ -63,7 +63,7 @@ class Test(ABC):
 
         return module
 
-    def serialize(self) -> str | bytes:
+    def serialize(self) -> str:
         """turn this test object into a dictionary for export"""
         return json.dumps(self)
 
@@ -95,7 +95,7 @@ class PrintTest(Test):
     def __init__(
         self,
         name: str,
-        file_path: PathLike,
+        file_path: StrPath,
         expected: str,
         *,
         inputs: list[str] = [],
@@ -144,7 +144,7 @@ class SimpleTest(Test):
     def __init__(
         self,
         name: str,
-        file_path: PathLike,
+        file_path: StrPath,
         function_name: str,
         expected: Any,
         *,
@@ -200,7 +200,7 @@ class SpecTest(Test):
     def __init__(
         self,
         name: str,
-        file_path: PathLike,
+        file_path: StrPath,
         symbol_name: str,
         expected: check_specs.SpecType,
         *,
@@ -234,7 +234,7 @@ class StructureTest(Test):
     def __init__(
         self,
         name: str,
-        file_path: PathLike,
+        file_path: StrPath,
         rules: list[check_structure.Rule] | check_structure.Rule,
         **kwargs,
     ):

@@ -4,7 +4,7 @@ drawn with, the alternate screen it is drawn on, and the terminal's mode.
 """
 
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 from prompt_toolkit.input import create_input
@@ -18,7 +18,7 @@ ALT_SCREEN_LEAVE = "\033[?1049l"
 
 
 @contextmanager
-def fullscreen() -> Iterator[None]:
+def fullscreen() -> Generator[None]:
     """
     Draw on the alternate screen while in this context. The cursor is shown again when
     it is left.
@@ -43,7 +43,7 @@ def fullscreen() -> Iterator[None]:
 
 
 @contextmanager
-def preserve_terminal_mode() -> Iterator[None]:
+def preserve_terminal_mode() -> Generator[None]:
     """
     Restore the terminal's mode when this context is left, e.g. around code that may
     change it. In the meantime, the terminal is in raw mode, as it is while keys are read

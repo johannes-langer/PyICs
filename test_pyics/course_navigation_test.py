@@ -15,6 +15,7 @@ import pytest
 
 from pyics.data import Course, Task
 from pyics.tests.tests import SimpleTest
+from pyics.util.paths import StrPath
 
 A, B, C = (Path(f"{n}.pyicstask.json") for n in "abc")
 
@@ -26,7 +27,7 @@ class _FakeTask:
     # the paths of the tasks checked by ``check_solved``, in order
     checked: ClassVar[list[Path]] = []
     # called by ``check_solved`` before it returns, e.g. to block
-    on_check: ClassVar[Callable[[Path], None]] = staticmethod(lambda path: None)
+    on_check: ClassVar[staticmethod[[Path], object]] = staticmethod(lambda path: None)
 
     def __init__(self, path: Path, *, setup: bool = True) -> None:
         self.path = path
@@ -60,27 +61,33 @@ def course(monkeypatch: pytest.MonkeyPatch) -> Course:
     return c
 
 
+def _path(task: Task | None) -> StrPath:
+    """The path of ``task``, which is only None while the course is loading."""
+    assert task is not None
+    return task.path
+
+
 # --- next ---
 
 
 def test_next_on_solved_task_advances(course: Course) -> None:
     _FakeTask.solved_paths.add(A)
-    assert course.next().path == B
+    assert _path(course.next()) == B
     assert course.task_changed
 
 
 def test_next_on_unsolved_task_stays(course: Course) -> None:
-    assert course.next().path == A
+    assert _path(course.next()) == A
     assert not course.task_changed
 
 
 def test_next_on_last_task_stays(course: Course) -> None:
     _FakeTask.solved_paths.update({A, B, C})
     course.next()
-    assert course.next().path == C
+    assert _path(course.next()) == C
     course.clear_task_changed()
 
-    assert course.next().path == C
+    assert _path(course.next()) == C
     assert not course.task_changed
 
 
@@ -88,7 +95,7 @@ def test_next_on_last_task_stays(course: Course) -> None:
 
 
 def test_previous_on_first_task_stays(course: Course) -> None:
-    assert course.previous().path == A
+    assert _path(course.previous()) == A
     assert not course.task_changed
 
 
@@ -97,7 +104,7 @@ def test_previous_goes_back(course: Course) -> None:
     course.next()
     course.clear_task_changed()
 
-    assert course.previous().path == A
+    assert _path(course.previous()) == A
     assert course.task_changed
 
 
@@ -109,14 +116,14 @@ def test_starts_on_the_first_unsolved_task_of_the_progress(
 ) -> None:
     monkeypatch.setattr("pyics.data.course.Task", _FakeTask)
     c = Course(name="c", tasks={"a": A, "b": B, "c": C}, progress=[1, 0, 0])
-    assert c.next().path == B
+    assert _path(c.next()) == B
     assert c.task_changed
 
 
 def test_a_solved_course_starts_on_its_last_task(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("pyics.data.course.Task", _FakeTask)
     c = Course(name="c", tasks={"a": A, "b": B, "c": C}, progress=[1, 1, 1])
-    assert c.previous().path == B  # i.e. it was on C
+    assert _path(c.previous()) == B  # i.e. it was on C
 
 
 # --- checking the progress ---
@@ -152,7 +159,7 @@ def test_check_starts_on_the_first_unsolved_task(
     assert not course.loading
     assert course.task_changed
     current = course.next()  # unsolved, so it stays
-    assert current is not None and current.path == B
+    assert isinstance(current, _FakeTask) and current.path == B
     assert current.is_set_up
     assert course.progress == Fraction(2, 3)
     # every task is checked once, including the one started on
@@ -165,7 +172,7 @@ def test_check_of_a_solved_course_starts_on_its_last_task(
     _FakeTask.solved_paths.update({A, B, C})
     course = checked([0, 0, 0])
     _wait_for_check(course)
-    assert course.previous().path == B  # i.e. it was on C
+    assert _path(course.previous()) == B  # i.e. it was on C
     assert course.progress == 1
 
 

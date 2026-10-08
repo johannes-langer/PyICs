@@ -340,9 +340,9 @@ def _prompt_test(
 
         if param.name == "file_path":
             prompt = SelectInput(param.name, [str(f) for f in ex_files])
-            if value is not param.empty:
+            if current is not None:
                 options = {paths.absolute(f): str(f) for f in ex_files}
-                prompt.set_answer(options.get(paths.absolute(value), ""))  # pyright: ignore[reportArgumentType]
+                prompt.set_answer(options.get(paths.absolute(current.file_path), ""))
             kwargs[param.name] = Path(s.ask(prompt)).absolute()
             continue
 
