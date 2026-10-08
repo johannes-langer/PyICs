@@ -87,6 +87,7 @@ def test_symbols_from_info_file(tmp_path: Path, ex_files: list[Path]) -> None:
             *_type("exp"),  # expected
             BACKSPACE, BACKSPACE, *_type("args[1:]"),  # function_args, prefilled with []
             ENTER,  # function_kwargs: keep {}
+            ENTER,  # traceable: keep True
         ],
         ex_files,
     )  # fmt: skip
@@ -96,6 +97,7 @@ def test_symbols_from_info_file(tmp_path: Path, ex_files: list[Path]) -> None:
     assert test.expected == ("A", "B", "C")
     assert test.function_args == ["A", "C"]
     assert test.function_kwargs == {}
+    assert test.traceable is True
 
 
 def test_missing_info_file_is_asked_again(tmp_path: Path, ex_files: list[Path]) -> None:
@@ -106,7 +108,7 @@ def test_missing_info_file_is_asked_again(tmp_path: Path, ex_files: list[Path]) 
             ENTER,  # reference a file: yes
             *_type(str(tmp_path / "info")),  # no such file...
             *_type(".py"),  # ...fixed, keeping the rejected input
-            ENTER, *_type("exp"), ENTER, ENTER,  # file_path, expected, keep defaults
+            ENTER, *_type("exp"), ENTER, ENTER, ENTER,  # file_path, expected, defaults
         ],
         ex_files,
     )  # fmt: skip
@@ -146,7 +148,7 @@ def test_invalid_expression_is_asked_again(ex_files: list[Path]) -> None:
             *_type("f"),  # function_name
             *_type("1 +"),  # expected: syntax error...
             *_type(" 1"),  # ...fixed, keeping the rejected input
-            ENTER, ENTER,  # function_args, function_kwargs: keep defaults
+            ENTER, ENTER, ENTER,  # function_args, function_kwargs, traceable: defaults
         ],
         ex_files,
     )  # fmt: skip
@@ -163,7 +165,7 @@ def test_unusable_match_is_prompted_for(tmp_path: Path, ex_files: list[Path]) ->
             # name isn't a str: enter text instead of picking the str 'function_name'
             DOWN, ENTER, *_type("n"),
             ENTER,  # file_path
-            ENTER, ENTER,  # function_args, function_kwargs: keep defaults
+            ENTER, ENTER, ENTER,  # function_args, function_kwargs, traceable: defaults
         ],
         ex_files,
     )  # fmt: skip
@@ -178,13 +180,28 @@ def test_without_info_file(ex_files: list[Path]) -> None:
             ENTER,  # file_path
             *_type("f"),  # function_name
             *_type("1"),  # expected
-            ENTER, ENTER,  # function_args, function_kwargs: keep defaults
+            ENTER, ENTER, ENTER,  # function_args, function_kwargs, traceable: defaults
         ],
         ex_files,
     )  # fmt: skip
     assert (test.name, test.function_name, test.expected) == ("t", "f", 1)
     assert test.function_args == []
     assert test.function_kwargs == {}
+
+
+def test_traceable_must_be_a_bool(ex_files: list[Path]) -> None:
+    test = _run(
+        [
+            DOWN, ENTER,  # reference a file: no
+            *_type("t"), ENTER, *_type("f"),  # name, file_path, function_name
+            *_type("1"),  # expected
+            ENTER, ENTER,  # function_args, function_kwargs: keep defaults
+            *[BACKSPACE] * len("True"), *_type("1"),  # traceable: not a bool...
+            BACKSPACE, *_type("False"),  # ...fixed
+        ],
+        ex_files,
+    )  # fmt: skip
+    assert test.traceable is False
 
 
 def test_too_few_keys_cancels(ex_files: list[Path]) -> None:
@@ -260,6 +277,7 @@ def test_print_test_expected_output_spans_lines(ex_files: list[Path]) -> None:
             ENTER,  # file_path
             *"Name: Bob", ENTER, *"Hello, Bob!", CTRL_D,  # expected: enter adds a line
             BACKSPACE, BACKSPACE, *_type('["Bob"]'),  # inputs, prefilled with []
+            ENTER,  # traceable: keep True
         ],
         ex_files,
     )  # fmt: skip
@@ -276,6 +294,7 @@ def test_print_test_from_info_file(tmp_path: Path, ex_files: list[Path]) -> None
         [
             ENTER, *_type(str(info)),  # reference the info file
             ENTER,  # file_path; name, expected, inputs: exact matches
+            ENTER,  # traceable: keep True
         ],
         ex_files,
     )  # fmt: skip
@@ -295,6 +314,7 @@ def test_print_test_inputs_must_be_strings_in_a_list(
             CTRL_D,  # expected: no output
             BACKSPACE, BACKSPACE, *_type(rejected),  # inputs...
             *[BACKSPACE] * len(rejected), *_type('["Bob"]'),  # ...fixed
+            ENTER,  # traceable: keep True
         ],
         ex_files,
     )  # fmt: skip
@@ -306,7 +326,7 @@ def test_print_test_is_offered(ex_files: list[Path]) -> None:
         [
             *[DOWN] * _TEST_TYPES.index(PrintTest), ENTER,  # PrintTest
             DOWN, ENTER, *_type("t"), ENTER,  # no info file, name, file_path
-            CTRL_D, ENTER,  # expected: no output, inputs: keep []
+            CTRL_D, ENTER, ENTER,  # expected: no output, inputs and traceable: keep
             *[DOWN] * len(_TEST_TYPES), ENTER,  # done
         ],
         lambda s: _prompt_tests(s, ex_files),

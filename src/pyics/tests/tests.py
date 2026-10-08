@@ -5,12 +5,13 @@ from abc import ABC, abstractmethod
 from importlib.machinery import ModuleSpec
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Protocol, Self
+from typing import Any, ClassVar, Protocol, Self
 
 from _pytest.assertion.util import assertrepr_compare, dummy_highlighter
 
 import pyics.util.json_handling as json
 from pyics.tests.capture import capture_stdout, provide_input
+from pyics.tests.trace import Trace
 from pyics.util.paths import StrPath
 from . import check_specs, check_structure
 
@@ -27,6 +28,9 @@ class Test(ABC):
 
     name: str
     file_path: StrPath
+    # whether the test runs the code in ``file_path``, which can then be traced (see
+    # ``run``)
+    supports_trace: ClassVar[bool] = False
 
     @abstractmethod
     def __init__(self): ...
@@ -38,10 +42,16 @@ class Test(ABC):
     def __call__(self) -> None:
         self.run()
 
-    def load_solution(self, *, as_main: bool = False) -> ModuleType:
+    def load_solution(
+        self, *, as_main: bool = False, trace: Trace | None = None
+    ) -> ModuleType:
         """
         Run the file at ``file_path`` as a new module, and return it. With ``as_main``,
         it is run as a script, i.e. with ``__name__ == "__main__"``.
+
+        With ``trace``, the file's code is watched by it (see ``Trace.watch``), so that
+        the calls into it that are run by ``trace`` are traced. A script is traced as a
+        whole, while importing a module isn't.
         """
         spec: ModuleSpec | None = iutil.spec_from_file_location(
             name="current_solution", location=self.file_path
@@ -59,7 +69,12 @@ class Test(ABC):
         # stale if the file was saved twice within a second without changing its size
         source = Path(self.file_path).read_bytes()
         code = compile(source, self.file_path, "exec", dont_inherit=True)
-        exec(code, module.__dict__)  # noqa: S102
+        if trace is not None:
+            trace.watch(code)
+        if trace is not None and as_main:
+            trace.run(lambda: exec(code, module.__dict__))  # noqa: S102
+        else:
+            exec(code, module.__dict__)  # noqa: S102
 
         return module
 
@@ -68,7 +83,12 @@ class Test(ABC):
         return json.dumps(self)
 
     @abstractmethod
-    def run(self) -> None: ...
+    def run(self, trace: Trace | None = None) -> None:
+        """
+        Run the test, raising an ``AssertionError`` if it fails. With ``trace``, the code
+        under test is traced by it, if the test ``supports_trace`` and the test's author
+        allows it.
+        """
 
 
 def _visible(output: str) -> str:
@@ -91,6 +111,10 @@ class PrintTest(Test):
 
     expected: str  # printout is necessarily str
     inputs: list[str]
+    supports_trace = True
+    # whether the test may be traced, e.g. by students who want to see what their code
+    # does. Also the default for tests stored before it was introduced.
+    traceable: bool = True
 
     def __init__(
         self,
@@ -99,6 +123,7 @@ class PrintTest(Test):
         expected: str,
         *,
         inputs: list[str] = [],
+        traceable: bool = True,
         **kwargs,
     ):
         if isinstance(inputs, str):
@@ -107,11 +132,13 @@ class PrintTest(Test):
         self.file_path = file_path
         self.expected = expected
         self.inputs = [str(answer) for answer in inputs]
+        self.traceable = traceable
 
-    def run(self) -> None:
+    def run(self, trace: Trace | None = None) -> None:
+        trace = trace if self.traceable else None
         with capture_stdout() as buffer, provide_input(self.inputs):
             try:
-                self.load_solution(as_main=True)
+                self.load_solution(as_main=True, trace=trace)
             except SystemExit:
                 pass  # the program ended
         res, expected = _visible(buffer.getvalue()), _visible(self.expected)
@@ -140,6 +167,10 @@ class SimpleTest(Test):
     function_args: list[Any]
     function_kwargs: dict[str, Any]
     expected: Any
+    supports_trace = True
+    # whether the test may be traced, which shows its arguments, too. Also the default
+    # for tests stored before it was introduced.
+    traceable: bool = True
 
     def __init__(
         self,
@@ -150,6 +181,7 @@ class SimpleTest(Test):
         *,
         function_args: list[Any] = [],
         function_kwargs: dict[str, Any] = {},
+        traceable: bool = True,
         **kwargs,
     ):
         self.name = name
@@ -158,15 +190,20 @@ class SimpleTest(Test):
         self.expected = expected
         self.function_args = function_args
         self.function_kwargs = function_kwargs
+        self.traceable = traceable
 
-    def run(self) -> None:
-        m = self.load_solution()
+    def run(self, trace: Trace | None = None) -> None:
+        trace = trace if self.traceable else None
+        m = self.load_solution(trace=trace)
         func = getattr(m, self.function_name)
         # copied, so a solution that modifies its arguments can't change them for the
         # next run of this test
-        res = func(
-            *copy.deepcopy(self.function_args), **copy.deepcopy(self.function_kwargs)
-        )
+        args = copy.deepcopy(self.function_args)
+        kwargs = copy.deepcopy(self.function_kwargs)
+        if trace is None:
+            res = func(*args, **kwargs)
+        else:
+            res = trace.run(lambda: func(*args, **kwargs))
 
         if res != self.expected:
             expl = list(
@@ -213,7 +250,7 @@ class SpecTest(Test):
         self.expected = check_specs.to_spec_dict(expected)
         self.by_type = by_type
 
-    def run(self) -> None:
+    def run(self, trace: Trace | None = None) -> None:
         m = self.load_solution()
         symb = getattr(m, self.symbol_name)
 
@@ -242,7 +279,7 @@ class StructureTest(Test):
         self.file_path = file_path
         self.rules = check_structure.validate_rules(rules)
 
-    def run(self) -> None:
+    def run(self, trace: Trace | None = None) -> None:
         path = Path(self.file_path)
         diff = check_structure.check_structure(
             self.rules, path.read_text(encoding="utf-8"), filename=path.name

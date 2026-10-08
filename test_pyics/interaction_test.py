@@ -286,6 +286,7 @@ def app(exercises: tuple[Path, Path], launch: Callable[[], App]) -> App:
 
 def test_startup_shows_the_first_task(app: App, exercises: tuple[Path, Path]) -> None:
     add, _ = exercises
+    app.resize(100, 40)  # wide enough for the footer's hotkeys on one line
     assert app.cli.info_text == "Implement add(a, b)."
     assert str(app.cli.main_title) == add.as_posix()
     assert app.cli.percentage == 0
@@ -294,7 +295,7 @@ def test_startup_shows_the_first_task(app: App, exercises: tuple[Path, Path]) ->
         "FF",  # main content
         "adds failed: 0 == 3",
         "adds negatives failed: 0 == -3",
-        "<ctrl-c> Quit | <n> Next | <p> Previous | <c> Courses | <↑/↓> Scroll",
+        "<ctrl-c> Quit | <n> Next | <p> Previous | <t> Trace | <c> Courses | <↑/↓> Scroll",
     ]
     # a frame drawn while the interface is updated only shows part of the update
     app.wait_for(lambda: all(text in app.screen for text in shown))
@@ -403,6 +404,64 @@ def test_solving_all_tasks(
     output = capsys.readouterr().out
     assert "Name: World" not in output
     assert "Hello, World!" not in output
+
+
+# --- tracing failed tests ---
+
+
+def test_t_traces_the_failed_tests_until_pressed_again(
+    app: App, exercises: tuple[Path, Path]
+) -> None:
+    add, _ = exercises
+    app.resize(80, 80)  # tall enough to show the traces
+    assert "Press t to trace failed tests with snoop." in app.screen
+    app.press("t")
+    app.wait_for(lambda: "Return value from add: 0" in app.screen)
+    assert app.course.tracing
+    shown = [
+        "Tracing failed tests with snoop, press t to stop.",
+        'Call to add in File "add.py", line 1',
+        "a = -1",
+        "2 |     return 0",
+    ]
+    app.wait_for(lambda: all(text in app.screen for text in shown))
+
+    # still traced once the exercise is saved
+    _save(add, "def add(a, b):\n    return a - b\n")
+    app.wait_for(lambda: "Return value from add: -1" in app.screen)
+
+    app.press("t")
+    app.wait_for(
+        lambda: "Press t to trace failed tests with snoop." in app.screen
+        and "Return value from add" not in app.screen
+    )
+    assert not app.course.tracing
+
+
+def test_tracing_is_off_for_another_task(
+    app: App, exercises: tuple[Path, Path]
+) -> None:
+    add, _ = exercises
+    app.resize(80, 80)  # tall enough to show the traces
+    app.press("t")
+    app.wait_for(lambda: "Return value from add: 0" in app.screen)
+    _save(add, ADD_SOLUTION)
+    app.wait_for(lambda: "2 passed" in app.screen)
+
+    app.press("n")
+    app.wait_for(lambda: "greets failed: '' == 'Hello, World!'" in app.screen)
+    app.wait_for(lambda: "Press t to trace failed tests with snoop." in app.screen)
+    assert not app.course.tracing
+    assert "Return value from greet" not in app.screen
+
+    # both the function test and the print test are traced
+    app.press("t")
+    app.wait_for(lambda: "Return value from greet: ''" in app.screen)
+    app.wait_for(lambda: "Call to <module>" in app.screen)
+
+    app.press("p")
+    app.wait_for(lambda: "Implement add(a, b)." in app.screen)
+    assert not app.course.tracing
 
 
 # --- course selection ---

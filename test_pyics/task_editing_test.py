@@ -266,7 +266,7 @@ def test_edit_test_prefilled(task_file: Path) -> None:
             ENTER,  # reference a file with test information: no
             ENTER, ENTER, ENTER,  # name, file_path, function_name: keep
             *_clear("1"), *_type("2"),  # expected
-            ENTER, ENTER,  # function_args, function_kwargs: keep
+            ENTER, ENTER, ENTER,  # function_args, function_kwargs, traceable: keep
             ENTER,
         ],
         task_file,
@@ -287,7 +287,7 @@ def test_edit_test_of_a_removed_file(task_file: Path) -> None:
             ENTER,  # edit the test, preselected since it can't be kept
             ENTER, ENTER,  # no test information file, name: keep
             ENTER,  # file_path: new.py, the only exercise file
-            ENTER, ENTER, ENTER, ENTER,  # keep the other parameters
+            ENTER, ENTER, ENTER, ENTER, ENTER,  # keep the other parameters
             ENTER,
         ],
         task_file,
@@ -311,6 +311,7 @@ def test_values_without_a_python_repr_are_prefilled_by_reference(
             ENTER, ENTER, ENTER, ENTER,  # name, file_path, function_name, expected
             ENTER,  # function_args, prefilled with a reference to the current value
             ENTER,  # function_kwargs
+            ENTER,  # traceable
             ENTER,
         ],
         task_file,
@@ -330,6 +331,7 @@ def test_strings_are_prefilled_despite_test_information(task_file: Path) -> None
             ENTER,  # file_path
             ENTER, ENTER,  # function_name: enter text (preselected), keep it
             ENTER, ENTER, ENTER,  # expected, function_args, function_kwargs
+            ENTER,  # traceable
             ENTER,
         ],
         task_file,

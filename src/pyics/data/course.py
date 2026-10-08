@@ -124,6 +124,18 @@ class Course:
             self.__check_thread.join(timeout)
 
     @property
+    def tracing(self) -> bool:
+        """Whether the current task's tests are traced (see ``Task.tracing``). Off for
+        each task that is moved to, and while the course is loading."""
+        return self.__current_task is not None and self.__current_task.tracing
+
+    def toggle_tracing(self) -> None:
+        """Turn tracing the current task's tests on or off (see ``Task.toggle_tracing``),
+        unless the course is loading."""
+        if self.__current_task is not None:
+            self.__current_task.toggle_tracing()
+
+    @property
     def loading(self) -> bool:
         """Whether the course is still looking for the task to start on."""
         return self.__current_task is None
