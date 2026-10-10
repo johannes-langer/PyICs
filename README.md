@@ -10,7 +10,7 @@ PyICs is a framework for interactive Python tutorials, inspired by the _rustling
 
 PyICs is available via ``pip``. Install the latest version using ``pip install pyics``, requiring ``python>=3.14``. PyICs is available on Windows (Windows 10 or later), MacOS, and Linux.
 
-<div class="alert alert-block alert-info">This is a draft of the final README. PyICs has not yet been published on pypi.</div>
+> This is a draft of the final README. PyICs has not yet been published on pypi.
 
 ## Using the PyICs App
 
@@ -32,11 +32,7 @@ pyics                           # start it from the course selector
 - ``pyics sources`` lists your sources, and ``pyics remove_source <name>`` removes one. Sources are stored in ``sources.json`` in your pyics configuration directory (e.g. ``~/.config/pyics`` on Linux, ``~/Library/Application Support/pyics`` on macOS, ``%APPDATA%\pyics`` on Windows), so they stay when pyics is upgraded. Administrators can add sources for all users of a computer in the site configuration directory (e.g. ``/etc/xdg/pyics/sources.json``). The ``PYICS_CONFIG_DIR`` environment variable sets another configuration directory, whose sources are then the only ones used.
 - The course selector also offers the courses of your sources that you haven't pulled yet, as they were when you last added, searched or pulled from them. Selecting one pulls it into the working directory.
 
-<div class="alert alert-block alert-warn">
-
-Courses run code on your computer, as their tests run your code together with theirs: only add sources and pull courses from people you trust. Sources are fetched over ``https`` (or from local files, e.g. on a network share); plain ``http`` has to be allowed with ``--allow_http``.
-
-</div>
+> Courses run code on your computer, as their tests run your code together with theirs: only add sources and pull courses from people you trust. Sources are fetched over ``https`` (or from local files, e.g. on a network share); plain ``http`` has to be allowed with ``--allow_http``.
 
 Some courses need packages besides ``pyics``, e.g. ``numpy``. They have to be installed in the same environment where PyICs is installed, siunce the tests run in the same Python interpreter. ``pyics search`` and the course selector show which of them are missing, and ``pyics pull`` prints the command that installs them (or runs it with ``--install_deps``, after asking). Packages are never installed without asking.
 
