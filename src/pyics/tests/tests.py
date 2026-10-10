@@ -13,7 +13,7 @@ import pyics.util.json_handling as json
 from pyics.tests.capture import capture_stdout, provide_input
 from pyics.tests.trace import Trace
 from pyics.util.paths import StrPath
-from . import check_specs, check_structure
+from . import check_specs, check_structure, compare
 
 
 class MarkupAssertionError(AssertionError):
@@ -161,6 +161,9 @@ class PrintTest(Test):
 class SimpleTest(Test):
     """
     Output of a function must match the desired output for some parameters.
+
+    The output is compared with ``compare.equal``: by ``==``, except for numpy arrays and
+    pandas objects, which are compared as a whole.
     """
 
     function_name: str
@@ -205,19 +208,8 @@ class SimpleTest(Test):
         else:
             res = trace.run(lambda: func(*args, **kwargs))
 
-        if res != self.expected:
-            expl = list(
-                assertrepr_compare(
-                    "==",
-                    res,
-                    self.expected,
-                    verbose=1,
-                    highlighter=dummy_highlighter,
-                    assertion_text_diff_style="ndiff",
-                )
-            ) or [f"{res!r} == {self.expected!r}"]
-
-            raise AssertionError("\n".join(expl))
+        if not compare.equal(res, self.expected):
+            raise AssertionError("\n".join(compare.explain(res, self.expected)))
 
 
 class SpecTest(Test):

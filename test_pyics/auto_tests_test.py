@@ -174,6 +174,42 @@ def test_json_round_trip(solution: Path) -> None:
     loaded.run()
 
 
+ARRAY_SOLUTION = """
+import numpy as np
+
+def double(a):
+    return np.asarray(a) * 2
+
+def mean(a):
+    return np.mean(a)
+"""
+
+
+@pytest.mark.parametrize("stored", [False, True])
+def test_numpy_arrays_are_compared_as_a_whole(tmp_path: Path, stored: bool) -> None:
+    """A test expecting an array passes for a correct solution, and fails for a wrong
+    one, also when stored in a task file."""
+    np = pytest.importorskip("numpy")
+    solution = tmp_path / "solution.py"
+    solution.write_text(ARRAY_SOLUTION)
+
+    def test(expected: object, function_name: str = "double") -> SimpleTest:
+        test = SimpleTest("t", solution, function_name, expected, function_args=[[1, 2]])
+        return json.loads(test.serialize()) if stored else test
+
+    test(np.array([2, 4])).run()
+    test(np.float64(1.5), "mean").run()
+    test(1.5, "mean").run()
+    with pytest.raises(AssertionError) as excinfo:
+        test(np.array([2, 0])).run()
+    assert str(excinfo.value).splitlines() == [
+        "array([2, 4]) == array([2, 0])",
+        "",
+        "Values differ at 1 of 2 positions:",
+        "At index 1 diff: 4 != 0",
+    ]
+
+
 # --- PrintTest ---
 
 SCRIPT = """
