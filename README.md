@@ -186,12 +186,26 @@ Exercise files can be Jupyter notebooks (``.ipynb``) as well as Python files. St
 
 #### As an Instructor
 
-- ``create_task`` and ``edit_task`` accept notebooks as exercise and solution files, and all tests work with them. ``SimpleTest``s and ``SpecTest``s find functions and classes by name, in whichever cell students define them. ``StructureTest``s check the code of all code cells: cells that can't be parsed are left out, and named in the message if the test fails. ``PrintTest``s compare the output of all cells.
+- ``create_task`` and ``edit_task`` accept notebooks as exercise and solution files, and all tests work with them. ``SimpleTest``s and ``SpecTest``s find functions and classes by name, in whichever cell students define them. ``StructureTest``s check the code of all code cells: cells that can't be parsed are left out, and named in the message if the test fails. ``PrintTest``s compare the output of all cells. Both can be restricted to a part of the notebook instead (see [Sections](#sections)).
 - Notebooks are stored normalized in task files: without their outputs and execution counts, so that the outputs of solutions don't reach students and task files stay small, and with the "Python (pyics)" kernel as their kernel. A notebook you merely ran doesn't count as changed when you edit the task.
 - Tag cells that tests shouldn't run (downloads, training) with ``skip-execution``.
 - The tests run in the directory PyICs was started in, while Jupyter runs a notebook in the notebook's directory: a file that a notebook opens by a relative path is looked up in different directories by the two.
 - ``pack`` finds the packages imported in the code cells of notebooks, too.
 - An alternative that needs no notebook support is to pair a notebook with a Python file using [Jupytext](https://jupytext.readthedocs.io), and to use the ``.py`` file as the exercise file (magics are commented out in it). Students then need Jupytext in their Jupyter, and pairing tends to confuse beginners.
+
+#### Sections
+
+Sections link a task to a part of a notebook, e.g. to one exercise of a lecture's notebook that holds several. Students see the task's section next to the notebook's path in the title of the main panel, e.g. ``.exercises/lecture.ipynb › Exercise 2: Breadth-First Search``.
+
+- **Where a section starts:** at a cell tagged ``pyics:<name>`` (in JupyterLab's property inspector, or with _Add Cell Tag_ in VS Code), or at a cell whose first line is the marker ``<!-- pyics: <name> -->`` (a markdown cell) or ``# pyics: <name>`` (a code cell). Names consist of letters, digits, ``_``, ``.`` and ``-``, e.g. ``ex2``. Tags are Jupyter's own way to mark cells, but hidden in most frontends. Markers are visible everywhere, and students can restore one they deleted.
+- **Where it ends:** just before the next section starts, or at the end of the notebook. Cells above the first section belong to none. If several cells start a section of the same name (e.g. a copied cell), the first of them does.
+- **Where to put it:** on the exercise's description, a markdown cell that students have no reason to change. The cells they add below it, split or move belong to the section, as long as they stay above the next one.
+- **A task's section:** ``create_task`` and ``edit_task`` ask which section of each notebook exercise file the task is about (if the notebook has sections), and store it in the task file (``"sections"``, by the notebook's path relative to the task file). Older versions of PyICs ignore it.
+- **Its tests:** ``StructureTest``s check only the code cells of the section, and fail if one of them can't be parsed. ``PrintTest``s compare only the output of the section's cells, while the whole notebook still runs, as a section usually needs the imports and data above it. ``SimpleTest``s and ``SpecTest``s find functions and classes by name, wherever they are defined, and aren't affected by sections.
+- **A test's own section:** ``StructureTest``s and ``PrintTest``s use the task's section, unless they are given one of their own: ``section="ex1"`` for another section, or ``section=None`` for the whole notebook. ``create_task`` offers _The task's section_, _Whole notebook_ and the notebook's other sections. A test that uses the task's section stores nothing, so it follows when the task's section is changed.
+- **A missing section fails its tests** with an explanation, e.g. ``Section 'ex2' not found: the cell that starts it (tagged 'pyics:ex2', or starting with the marker '# pyics: ex2') was removed or its tag changed.``, and the title shows ``section 'ex2' not found``. Tests never check another part of the notebook instead.
+- **Several tasks in one notebook:** each task lists the same notebook among its exercise files, with its own section, and is solved on its own. The first of them that is set up creates the notebook (an existing exercise file is never overwritten), so they should all store the same contents for it: ``pack`` warns if they don't, and so does ``edit_task`` after writing a task (choose _Update_ for the notebook to store it as it is on disk).
+- **The title:** the section's title is the first heading of the cell that starts it, or else its name. It is looked up in the saved notebook each time the title is drawn, so it follows the section when its cells are moved. Running PyICs in a terminal other than VS Code's, while a JupyterLab serves the notebook, makes the title a link that opens the notebook in JupyterLab, scrolled to the section. JupyterLab asks before it opens the link, in a new tab: close the notebook's old tab, or install [``jupyter-collaboration``](https://github.com/jupyterlab/jupyter-collaboration), so the two don't overwrite each other's changes. JupyterLab only opens notebooks in hidden directories (e.g. ``.exercises``) if it runs with ``--ContentsManager.allow_hidden=True``.
 
 ## Technical Information
 
@@ -205,5 +219,5 @@ The ``src/pyics`` directory contains the following submodules:
 - ``scripts`` which contains the executable scripts
 - ``tests`` which contains anything related to dynamic test objects (the core testing logic for student code)
 - ``distribution`` which packs, publishes and pulls courses, and checks the packages they need
-- ``notebook`` which reads Jupyter notebooks, and runs their code cells as exercise files
+- ``notebook`` which reads Jupyter notebooks, runs their code cells as exercise files, and finds their sections
 - ``util`` containing logic for json handling and logging
