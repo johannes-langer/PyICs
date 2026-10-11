@@ -8,11 +8,13 @@ from _pytest._code.code import TerminalRepr
 from _pytest._io import TerminalWriter
 from _pytest.nodes import Node
 from rich.errors import MarkupError
+from rich.style import Style
 from rich.text import Text
 
 from pyics.tests import Test
+from pyics.tests.results import TestResult
 from pyics.tests.tests import MarkupAssertionError
-from pyics.tests.trace import Trace
+from pyics.tests.trace import Trace, ansi_text
 
 
 @dataclasses.dataclass(eq=False)
@@ -24,12 +26,19 @@ class RichFailureRepr(TerminalRepr):
     """
 
     text: Text
-    trace: Text | None = None
+    # the trace as text with ANSI escape codes (see ``Trace.ansi``), which a
+    # ``TestResult`` keeps as it is
+    trace_ansi: str | None = None
+
+    @property
+    def trace(self) -> Text | None:
+        """The trace of the failed test, or why there is none, if it was traced."""
+        return None if self.trace_ansi is None else ansi_text(self.trace_ansi)
 
     def toterminal(self, tw: TerminalWriter) -> None:
         tw.line(self.text.plain)
-        if self.trace is not None:
-            tw.line(self.trace.plain)
+        if (trace := self.trace) is not None:
+            tw.line(trace.plain)
 
 
 class PyicsItem(pytest.Item):
@@ -75,22 +84,23 @@ class PyicsItem(pytest.Item):
             except MarkupError:
                 pass  # shown as it is, rather than failing the whole run
         return RichFailureRepr(
-            Text.assemble(f"{self.name} failed: ", message), self._trace_text()
+            Text.assemble(f"{self.name} failed: ", message), self._trace_ansi()
         )
 
-    def _trace_text(self) -> Text | None:
-        """The trace of the failed test, or why there is none, if it is traced."""
+    def _trace_ansi(self) -> str | None:
+        """The trace of the failed test, or why there is none (dimmed), if it is
+        traced, as text with ANSI escape codes (see ``Trace.ansi``)."""
         if not self.tracing:
             return None
+        dim = Style(dim=True).render
         if not self.test_obj.supports_trace:
-            return Text(f"{type(self.test_obj).__name__}s can't be traced.", style="dim")
+            return dim(f"{type(self.test_obj).__name__}s can't be traced.")
         if not getattr(self.test_obj, "traceable", True):
-            return Text("Tracing is turned off for this test.", style="dim")
+            return dim("Tracing is turned off for this test.")
         assert self.recorded_trace is not None
-        if not (trace := self.recorded_trace.text):
-            return Text(
-                "Nothing was traced: the test failed before running your code.",
-                style="dim",
+        if not (trace := self.recorded_trace.ansi):
+            return dim(
+                "Nothing was traced: the test failed before running your code."
             )
         return trace
 
@@ -118,6 +128,11 @@ class LiveTestCollectionPlugin:
         self.test_objs = test_objs
         self.tracing = tracing
         self.reports = []
+        # the reports as results that can cross a process boundary, with the position
+        # of their test in ``test_objs``
+        self.results: list[TestResult] = []
+        self._indices: dict[int, int] = {}
+        self._index: int | None = None
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_collection(self, session: pytest.Session):
@@ -126,12 +141,20 @@ class LiveTestCollectionPlugin:
             for obj in self.test_objs
         ]
         session.testscollected = len(session.items)
+        # by identity, since tests can share their name, and with it their nodeid
+        self._indices = {id(item): i for i, item in enumerate(session.items)}
         return (
             True  # @Claude: "short-circuits the default collection, no files are touched"
         )
 
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_runtest_protocol(self, item: pytest.Item, nextitem: pytest.Item | None):
+        # the reports logged until the next test starts are this test's
+        self._index = self._indices.get(id(item))
+
     def pytest_runtest_logreport(self, report):
         self.reports.append(report)
+        self.results.append(TestResult.from_report(report, self._index))
 
 
 class NotebookCollectionPlugin:
