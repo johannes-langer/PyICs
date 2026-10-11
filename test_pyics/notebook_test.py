@@ -40,6 +40,7 @@ from pyics.distribution import dependencies
 from pyics.notebook import cells, loader
 from pyics.notebook.cells import Cell, NotebookError
 from pyics.scripts.create_task import _edit_files
+from pyics.scripts.pack import _pack
 from pyics.tests.check_structure import check_structure
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin, RichFailureRepr
 from pyics.tests.tests import (
@@ -680,6 +681,34 @@ def test_used_modules_finds_the_imports_of_notebooks(chdir: Path) -> None:
         "fakepkg": {"t.pyicstask.json"},
         "pandas": {"t.pyicstask.json"},
     }
+
+
+def test_pack_shows_how_notebooks_install_packages(
+    chdir: Path, fake_package: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ex = write_notebook(
+        chdir / "nb/ex.ipynb",
+        [
+            markdown("Run `%pip install fake-package` first."),
+            "%pip install fake-package\nimport fakepkg",
+            "%%capture\n  !pip install -q fake-package==1.2.0",
+        ],
+    )
+    sol = write_notebook(chdir / "nb/sol.ipynb", ["%pip install fake-package"])
+    task_file = Task.create_task_json(chdir / "t", "T", "", ex, sol)
+    manifest = Course.create_course_manifest(chdir / "course", [task_file])
+    _pack(manifest, chdir / "out.zip", yes=True)
+    assert (
+        "  fake-package (in t.pyicstask.json)\n"
+        "Its notebooks install packages with:\n"
+        "  nb/ex.ipynb (cell 2): %pip install fake-package\n"
+        "  nb/ex.ipynb (cell 3): !pip install -q fake-package==1.2.0\n"
+        "  nb/sol.ipynb (cell 1): %pip install fake-package\n"
+    ) in capsys.readouterr().out
+
+    # only shown while packages are undeclared
+    _pack(manifest, chdir / "out.zip", yes=True)
+    assert "install" not in capsys.readouterr().out
 
 
 # --- the app: rerunning the tests when a notebook is saved ---

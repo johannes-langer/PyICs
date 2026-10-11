@@ -22,7 +22,11 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import Any
 
-from pyics.distribution.dependencies import ModulePolicy, manifest_requirements
+from pyics.distribution.dependencies import (
+    ModulePolicy,
+    manifest_requirements,
+    pip_install_lines,
+)
 from pyics.distribution.slugs import check_slug, slugify
 from pyics.notebook import cells
 from pyics.util import json_handling as json
@@ -239,6 +243,40 @@ def differing_notebooks(
         for notebook, contents in stored.items()
         if len(set(contents.values())) > 1
     }
+
+
+def pip_installs(
+    tasks: Mapping[Path, Mapping[str, Any]],
+) -> list[tuple[Path, int, str]]:
+    """
+    The lines that install packages (see ``dependencies.pip_install_lines``) in the
+    exercise and solution notebooks the ``tasks`` store, once each, e.g. those of a
+    notebook that several tasks share.
+
+    Parameters
+    ----------
+    tasks: Mapping[Path, Mapping[str, Any]]
+        Task files by absolute path, mapped to their data as read by
+        ``json_handling.loads_plain``.
+
+    Returns
+    -------
+    list[tuple[Path, int, str]]
+        The notebook's absolute path, the number of the line's cell, and the line.
+    """
+    found: dict[tuple[Path, int, str], None] = {}  # ordered set
+    for task_file, data in tasks.items():
+        try:
+            exercises, solutions, _ = _task_files_paths(data, task_file.parent)
+        except ArchiveError:
+            continue
+        for files, key in ((exercises, "exercise_code"), (solutions, "solution_code")):
+            codes = data.get(key)
+            for path, text in zip(files, codes if isinstance(codes, list) else []):
+                if cells.is_notebook(path) and isinstance(text, str):
+                    for number, line in pip_install_lines(text):
+                        found[(paths.absolute(path), number, line)] = None
+    return list(found)
 
 
 def _included_files(

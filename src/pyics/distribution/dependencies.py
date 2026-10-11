@@ -13,6 +13,7 @@ its author can declare them.
 import ast
 import importlib.metadata
 import importlib.util
+import re
 import shlex
 import subprocess
 import sys
@@ -363,6 +364,30 @@ def _python_code(code: str, file: object) -> str:
         return loader.python_source(cells.parse(code)).source
     except cells.NotebookError:
         return ""
+
+
+# a notebook line that installs packages, e.g. ``%pip install numpy`` or ``!pip install
+# -q numpy``
+_PIP_INSTALL = re.compile(r"[%!]\s*(?:pip3?|python3? -m pip)\s+install\b")
+
+
+def pip_install_lines(code: str) -> list[tuple[int, str]]:
+    """
+    The lines of the code cells of the notebook ``code`` (the contents of an ``.ipynb``
+    file) that install packages, e.g. ``%pip install numpy``, with the number of their
+    cell (see ``Cell.number``). They hint at the packages a course needs, which tests
+    don't install (see ``loader``). Empty if ``code`` isn't a notebook.
+    """
+    try:
+        code_cells = cells.code_cells(cells.parse(code))
+    except cells.NotebookError:
+        return []
+    return [
+        (cell.number, line.strip())
+        for cell in code_cells
+        for line in cell.source.splitlines()
+        if _PIP_INSTALL.match(line.strip())
+    ]
 
 
 def used_modules(
