@@ -168,6 +168,31 @@ Students add its URL with ``pyics add_source``. A course archive can also be pul
 
 Archives are checked before anything of them is used: they can't write files outsinde the directory they are pulled to, their has h has to match the index, and they can only name the modules of the packages they declare.
 
+### Jupyter Notebooks
+
+Exercise files can be Jupyter notebooks (``.ipynb``) as well as Python files. Students work on them in JupyterLab, Notebook 7 or VS Code, and run PyICs next to them, e.g. in JupyterLab's or VS Code's terminal.
+
+#### As a Student
+
+- The tests of a task run whenever you **save** its notebook (<kbd>ctrl</kbd>+<kbd>s</kbd>, or when Jupyter autosaves it), like when you save a Python file.
+- They run the code cells of the saved notebook from the top, the way _Restart Kernel and Run All Cells_ does. An error in a cell doesn't stop the run, so an unfinished exercise further down doesn't fail the tests of the exercises above it. When a test fails, its message names the cells that raised an error, e.g. ``cell 7 raised NameError: name 'qeue' is not defined``. Cells are counted from the top, markdown cells included.
+- Notebook-only syntax in a test run:
+  - ``%%time``, ``%%timeit`` and ``%%capture`` run their cell once, without timing it, and so do ``%time`` and ``%timeit`` for their line. What ``%%capture`` captures isn't part of the output.
+  - Other cell magics (e.g. ``%%writefile``, ``%%bash``) skip their cell, and line magics (e.g. ``%matplotlib inline``, ``%pip install``) and shell commands (``!ls``) do nothing: ``files = !ls`` gives an empty list.
+  - ``display(x)`` prints ``x`` as Jupyter shows it as text (its ``repr``). Plots are drawn without a window, so ``plt.show()`` doesn't wait for one to be closed.
+- Cells tagged ``skip-execution`` don't run in tests, e.g. a long download or training run (tags are edited in JupyterLab's property inspector, or with _Add Cell Tag_ in VS Code).
+- Output tests (``PrintTest``) compare what all cells output: what they print, and what Jupyter shows as text, i.e. displayed objects, and the value of a cell whose last line is an expression (``Out[n]``), unless it is ``None`` or the line ends with ``;``.
+- Traces (<kbd>t</kbd>) and the messages of structure tests name cells and their lines, e.g. ``bfs.ipynb:cell 3`` or ``cell 3, line 2``.
+
+#### As an Instructor
+
+- ``create_task`` and ``edit_task`` accept notebooks as exercise and solution files, and all tests work with them. ``SimpleTest``s and ``SpecTest``s find functions and classes by name, in whichever cell students define them. ``StructureTest``s check the code of all code cells: cells that can't be parsed are left out, and named in the message if the test fails. ``PrintTest``s compare the output of all cells.
+- Notebooks are stored normalized in task files: without their outputs and execution counts, so that the outputs of solutions don't reach students and task files stay small, and with the "Python (pyics)" kernel as their kernel. A notebook you merely ran doesn't count as changed when you edit the task.
+- Tag cells that tests shouldn't run (downloads, training) with ``skip-execution``.
+- The tests run in the directory PyICs was started in, while Jupyter runs a notebook in the notebook's directory: a file that a notebook opens by a relative path is looked up in different directories by the two.
+- ``pack`` finds the packages imported in the code cells of notebooks, too.
+- An alternative that needs no notebook support is to pair a notebook with a Python file using [Jupytext](https://jupytext.readthedocs.io), and to use the ``.py`` file as the exercise file (magics are commented out in it). Students then need Jupytext in their Jupyter, and pairing tends to confuse beginners.
+
 ## Technical Information
 
 This project is managed using ``uv``. If you want to contribute to the project, run ``uv sync`` after cloning the repository at the top level to create a virtual environment with the required packages installed.
@@ -180,4 +205,5 @@ The ``src/pyics`` directory contains the following submodules:
 - ``scripts`` which contains the executable scripts
 - ``tests`` which contains anything related to dynamic test objects (the core testing logic for student code)
 - ``distribution`` which packs, publishes and pulls courses, and checks the packages they need
+- ``notebook`` which reads Jupyter notebooks, and runs their code cells as exercise files
 - ``util`` containing logic for json handling and logging
