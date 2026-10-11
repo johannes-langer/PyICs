@@ -21,7 +21,8 @@ from pyics.util import paths, terminal
 from pyics.util.paths import StrPath
 from pyics.util.logging import get_logger
 from pyics.tests import Test
-from pyics.tests.pytest_integration import LiveTestCollectionPlugin, RichFailureRepr
+from pyics.tests.pytest_integration import LiveTestCollectionPlugin
+from pyics.tests.results import TestResult
 
 # pytest runs aren't thread-safe (e.g. the tests import the exercise file as the module
 # ``current_solution``), so all tasks' runs are serialized
@@ -38,19 +39,15 @@ def wait_for_test_runs(timeout: float = -1) -> None:
         _pytest_lock.release()
 
 
-def _failure_text(report: pytest.TestReport) -> Text:
-    """The failure message of ``report``, highlighted if it comes from a ``PyicsItem``"""
-    if isinstance(report.longrepr, RichFailureRepr):
-        return report.longrepr.text
-    return Text(report.longreprtext)
+def _failure_text(result: TestResult) -> Text:
+    """The failure message of ``result``, highlighted if it comes from a ``PyicsItem``"""
+    return result.message_text
 
 
-def _failure_trace(report: pytest.TestReport) -> Text | None:
-    """The trace of the failed test of ``report``, or why there is none, if it was run
+def _failure_trace(result: TestResult) -> Text | None:
+    """The trace of the failed test of ``result``, or why there is none, if it was run
     with tracing (see ``Task.tracing``)"""
-    if isinstance(report.longrepr, RichFailureRepr):
-        return report.longrepr.trace
-    return None
+    return result.trace_text
 
 
 def _traceable(test: Test) -> bool:
@@ -181,7 +178,7 @@ class Task:
 
         self.__info = self.instructions
         self.__status = Text("tests pending...", style="dim")
-        self.test_results: list[pytest.TestReport] = []
+        self.test_results: list[TestResult] = []
         self.__tested = False
 
         self._tests_lock = threading.Lock()
@@ -434,15 +431,15 @@ class Task:
             with _pytest_lock, terminal.preserve_terminal_mode():
                 pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
 
-            self.test_results = plugin.reports
+            self.test_results = plugin.results
             self.__traced = tracing
             self.__tested = True
 
             # log reports
             logger = get_logger(__name__)
-            for rep in self.test_results:
-                logger.debug(f"{rep.nodeid} {rep.when} {rep.outcome}")
-                logger.debug(rep.longreprtext)
+            for result in self.test_results:
+                logger.debug(f"{result.nodeid} {result.when} {result.outcome}")
+                logger.debug(_failure_text(result).plain)
 
             self.update_status()
             self.__new_test_results = True

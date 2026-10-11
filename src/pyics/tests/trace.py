@@ -11,6 +11,7 @@ from pathlib import Path
 from types import CodeType
 
 import snoop
+from rich.style import Style
 from rich.text import Text
 from snoop.formatting import DefaultFormatter, Event
 from snoop.tracer import FrameInfo
@@ -128,12 +129,28 @@ class Trace:
             self._lines.flush()
 
     @property
-    def text(self) -> Text:
-        """The trace, highlighted. If it is longer than ``max_lines``, the lines in
-        between its first and last ones are left out, and marked as such."""
-        lines = [Text.from_ansi(line) for line in self._lines.head]
+    def ansi(self) -> str:
+        """The trace as snoop highlighted it, with ANSI escape codes, one trace line per
+        line, so that it can be passed on as text, e.g. to another process (see
+        ``ansi_text``). If it is longer than ``max_lines``, the lines in between its
+        first and last ones are left out, and marked as such."""
+        lines = list(self._lines.head)
         if self._lines.omitted:
             omitted = f"... {self._lines.omitted} lines omitted ..."
-            lines.append(Text(omitted, style="dim"))
-        lines += [Text.from_ansi(line) for line in self._lines.tail]
-        return Text("\n").join(lines)
+            lines.append(Style(dim=True).render(omitted))
+        lines += self._lines.tail
+        return "\n".join(lines)
+
+    @property
+    def text(self) -> Text:
+        """The trace, highlighted (see ``ansi``)."""
+        return ansi_text(self.ansi)
+
+
+def ansi_text(ansi: str) -> Text:
+    """
+    The highlighted text of ``ansi``, text with ANSI escape codes such as a trace (see
+    ``Trace.ansi``). Each line is decoded on its own, so that a color left open at the end
+    of a line doesn't run on into the next.
+    """
+    return Text("\n").join(Text.from_ansi(line) for line in ansi.split("\n"))
