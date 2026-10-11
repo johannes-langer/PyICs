@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from types import CodeType, ModuleType
 from typing import Any, NamedTuple
 
-from pyics.notebook import cells
+from pyics.notebook import cells, sections
 from pyics.notebook.cells import Cell
 from pyics.tests.capture import capture_stdout
 from pyics.tests.trace import Trace
@@ -97,10 +97,28 @@ class NotebookRun:
     # what Jupyter shows as text, i.e. the ``repr`` of objects passed to ``display``,
     # and of the cell's final expression
     outputs: dict[int, str] = field(default_factory=dict)
+    # the notebook that was run, as read by ``cells.read``
+    notebook: dict[str, Any] | None = None
 
-    def output(self, of: Iterable[Cell] | None = None) -> str:
-        """The output of the cells ``of`` (of all cells by default), in their order in
-        the notebook."""
+    def output(
+        self, of: Iterable[Cell] | None = None, *, section: str | None = None
+    ) -> str:
+        """
+        The output of the cells ``of``, or of the cells of the notebook's section
+        ``section`` (see ``pyics.notebook.sections``), or of all cells by default, in
+        their order in the notebook.
+
+        Raises
+        ------
+        SectionNotFound
+            If the notebook that was run has no section ``section``.
+        """
+        if section is not None:
+            if of is not None:
+                raise TypeError("give either the cells or the section, not both")
+            if self.notebook is None:
+                raise ValueError("the notebook that was run isn't known")
+            of = sections.get_section(self.notebook, section).cells
         if of is None:
             return "".join(self.outputs[i] for i in sorted(self.outputs))
         indices = sorted({cell.index for cell in of})
@@ -228,7 +246,9 @@ def _source_of(code_cells: Iterable[Cell]) -> NotebookSource:
     return NotebookSource("".join(parts), included, unparsable, starts)
 
 
-def python_source(path_or_nb: StrPath | dict[str, Any]) -> NotebookSource:
+def python_source(
+    path_or_nb: StrPath | dict[str, Any], *, section: str | None = None
+) -> NotebookSource:
     """
     The code cells of the notebook at ``path_or_nb`` (or of the notebook itself, as read
     by ``cells.parse``) as Python source, e.g. to check its structure: their code one
@@ -238,13 +258,20 @@ def python_source(path_or_nb: StrPath | dict[str, Any]) -> NotebookSource:
     ``%%bash``) and those that can't be parsed are left out. Cells tagged
     ``skip-execution`` are included, as they are part of the notebook's code.
 
+    With ``section``, only the code cells of the notebook's section of that name (see
+    ``pyics.notebook.sections``) are included.
+
     Raises
     ------
     NotebookError
         If the notebook isn't a notebook in nbformat 4.
+    SectionNotFound
+        If the notebook has no section ``section``.
     """
     nb = path_or_nb if isinstance(path_or_nb, dict) else cells.read(path_or_nb)
-    return _source_of(cells.code_cells(nb))
+    if section is None:
+        return _source_of(cells.code_cells(nb))
+    return _source_of(sections.get_section(nb, section).code_cells)
 
 
 # --- running cells ---
@@ -494,7 +521,7 @@ def run_notebook(
         module.__name__ = "__main__"
     sys.modules[module_name] = module
 
-    run = NotebookRun(module)
+    run = NotebookRun(module, notebook=nb)
     runner = _Runner(path, run, trace)
     code_cells = cells.code_cells(nb)
     try:
