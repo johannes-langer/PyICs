@@ -2,15 +2,19 @@
 End to end: a real Jupyter kernel with the pyics extension (``--ext=pyics``, as the
 "Python (pyics)" kernel starts it), driven through ``jupyter_client`` like a frontend
 drives it, for a notebook of a course: live results in the notebook's channel, cells
-without any output of pyics, interrupting a tested endless loop, and the kernel's
-files removed when it shuts down.
+without any output of pyics, interrupting a tested endless loop, the kernel's files
+removed when it shuts down, and the TUI's course showing the kernel's live results
+until the kernel restarts or is killed.
 """
 
+import io
 import json
 import os
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +22,11 @@ import pytest
 from jupyter_client import BlockingKernelClient, KernelManager
 from jupyter_client.kernelspec import KernelSpecManager
 from notebook_helpers import markdown, write_notebook
+from rich.console import Console
 
 from pyics.data import Course, Task
-from pyics.notebook.channel import LiveResults, channel_dir, read_json
+from pyics.data.task import SOLVED_LIVE
+from pyics.notebook.channel import ChannelReader, LiveResults, channel_dir, read_json
 from pyics.tests.tests import PrintTest, SimpleTest
 
 # generous, for slow CI machines
@@ -212,3 +218,118 @@ def test_a_kernel_runs_the_tests_live_and_silently(
     # a kernel that shuts down cleanly takes its files with it
     km.shutdown_kernel(now=False)
     assert list(channel_dir(notebook).iterdir()) == []
+
+
+def _status(course: Course) -> str:
+    console = Console(width=300, record=True, file=io.StringIO())
+    console.print(course.status)
+    return console.export_text()
+
+
+def test_the_tui_shows_the_live_results_of_a_kernel(
+    tmp_path: Path,
+    start_kernel: Callable[[Path], Kernel],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # where the TUI's pytest runs write their cache
+    monkeypatch.chdir(tmp_path)
+    # a killed kernel is gone sooner than after 10 s, with a margin for slow machines
+    monkeypatch.setattr(
+        "pyics.data.task.ChannelReader", partial(ChannelReader, timeout=6.0)
+    )
+    template = [
+        markdown("# Adding"),
+        "def add(a, b):\n    return 0\n",
+        'print("Adding")',
+    ]
+    notebook = write_notebook(tmp_path / "add.ipynb", template)
+    solution = write_notebook(tmp_path / ".solutions/add.ipynb", [])
+    tests = [
+        SimpleTest("adds", notebook, "add", 3, function_args=[1, 2]),
+        PrintTest("prints", notebook, "Adding\n"),
+    ]
+    task = Task.create_task_json(
+        tmp_path / ".tasks/add", "Add", "Implement add.", notebook, solution, tests
+    )
+    manifest = Course.create_course_manifest(tmp_path / "course", [task], name="Adding")
+    km, kc = start_kernel(notebook)
+    threads = set(threading.enumerate())
+    course = Course.load_course_manifest(manifest)
+
+    def tick_until(*texts: str, progress: float | None = None) -> str:
+        """Tick the course, as the TUI does, until its status shows ``texts`` (and its
+        progress is ``progress``, if given)."""
+        deadline = time.monotonic() + TIMEOUT
+        while True:
+            course.tick()
+            status = _status(course)
+            if all(text in status for text in texts) and (
+                progress is None or course.progress == progress
+            ):
+                return status
+            assert time.monotonic() < deadline, f"timed out, showing:\n{status}"
+            time.sleep(0.05)
+
+    try:
+        tick_until("1 failed, 1 passed", "run a cell to see live results")
+
+        # defining the function shows its live pass, which doesn't count
+        assert execute(kc, "def add(a, b):\n    return a + b\n", "cell-2") == []
+        tick_until("Live results from your notebook kernel (cell 2,", SOLVED_LIVE)
+        assert course.progress == 0
+
+        # redefining it wrongly turns it red
+        execute(kc, "def add(a, b):\n    return a - b\n", "cell-2")
+        tick_until("FAILED ::adds (live) - adds failed: -1 == 3")
+
+        # saving the notebook counts
+        execute(kc, "def add(a, b):\n    return a + b\n", "cell-2")
+        tick_until(SOLVED_LIVE)
+        assert course.progress == 0
+        solved = [
+            markdown("# Adding"),
+            "def add(a, b):\n    return a + b\n",
+            'print("Adding")',
+        ]
+        write_notebook(notebook, solved)
+        now = time.time()  # after the live run, even where file times are coarse
+        os.utime(notebook, (now, now))
+        status = tick_until(
+            "Results from your saved notebook, which was saved after", progress=1
+        )
+        assert SOLVED_LIVE not in status
+
+        # after t, the kernel traces its live runs
+        course.toggle_tracing()
+        assert read_json(channel_dir(notebook) / "control.json")["tracing"] is True
+        execute(kc, "def add(a, b):\n    return a * b\n", "cell-2")
+        (adds,) = [
+            r
+            for r in live_results(notebook).for_task(task) or []
+            if r.when == "call" and r.nodeid == "::adds"
+        ]
+        assert adds.outcome == "failed" and adds.trace is not None
+        status = tick_until("FAILED ::adds (live) - adds failed: 2 == 3")
+        assert "trace" in status and "return a * b" in status
+
+        # restarting the kernel drops its live results
+        km.restart_kernel()
+        kc.wait_for_ready(timeout=STARTUP_TIMEOUT)
+        tick_until(
+            "Your notebook kernel restarted: run your cells to see live results."
+        )
+        # it loaded the extension again
+        execute(kc, "def add(a, b):\n    return 0\n", "cell-2")
+        tick_until("Live results from your notebook kernel", "adds failed: 0 == 3")
+
+        # killing it drops them once its heartbeat is missed
+        km.shutdown_kernel(now=True)
+        status = tick_until("No notebook kernel connected")
+        assert "2 passed" in status and "(live)" not in status
+        assert course.progress == 1
+    finally:
+        course.stop_progress_check()
+        for thread in set(threading.enumerate()) - threads:
+            thread.join(TIMEOUT)
+        # the course's own pytest runs remove this when they finish
+        os.environ.setdefault("PYTEST_CURRENT_TEST", "")
