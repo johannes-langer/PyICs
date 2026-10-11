@@ -184,6 +184,9 @@ class TestResult:
         if isinstance(report.longrepr, RichFailureRepr):
             message = to_markup(report.longrepr.text)
             trace = report.longrepr.trace_ansi
+        elif report.skipped and isinstance(report.longrepr, tuple):
+            # (file, line, reason) of a skipped test
+            message = to_markup(Text(str(report.longrepr[-1])))
         elif not report.passed:
             message = to_markup(Text(report.longreprtext))
         return cls(
