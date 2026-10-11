@@ -122,6 +122,17 @@ def _describe_run(run: LiveResults) -> str:
     return f"cell {run.cell.number}, {at}"
 
 
+def _describe_kernel(state: ChannelState) -> str:
+    """The connected kernel of a channel's ``state``, named if the notebook has several
+    kernels, e.g. "your notebook kernel with pid 1234, the last of 2 kernels to run a
+    cell"."""
+    kernel, count = state.kernel, len(state.kernels)
+    if kernel is None or count < 2:
+        return "your notebook kernel"
+    pid = "" if kernel.pid is None else f" with pid {kernel.pid}"
+    return f"your notebook kernel{pid}, the last of {count} kernels to run a cell"
+
+
 # the order in which the channels of a task's notebooks are told about, if no kernel
 # of them has results for the task
 _STATUS_ORDER = [
@@ -495,8 +506,9 @@ class Task:
         if live:
             assert live_run is not None
             source = (
-                f"Live results from your notebook kernel ({_describe_run(live_run)}). "
-                "Save the notebook to count your progress."
+                f"Live results from {_describe_kernel(state)} "
+                f"({_describe_run(live_run)}). Save the notebook to count your "
+                "progress."
             )
         elif state.status is ChannelStatus.TIMED_OUT:
             source = (
