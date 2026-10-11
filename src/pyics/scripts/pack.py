@@ -6,7 +6,7 @@ from pyics.distribution import archive, dependencies
 from pyics.distribution.archive import ArchiveError
 from pyics.distribution.slugs import check_slug
 from pyics.distribution.sources import SourceError, build_index
-from pyics.scripts.console import confirm, fail
+from pyics.scripts.console import confirm, fail, warn_differing_notebooks
 from pyics.util import paths
 
 
@@ -68,7 +68,8 @@ def _pack(
 
     The given version, description, slug and tags are stored in the manifest, so the
     next pack reuses them. So are the packages the course uses that its requires don't
-    declare yet, once confirmed.
+    declare yet, once confirmed. Tasks that share a notebook, but store different
+    contents for it, are warned about.
 
     Parameters
     ----------
@@ -97,6 +98,9 @@ def _pack(
     """
     try:
         course = archive.read_course(Path(manifest))
+        warn_differing_notebooks(
+            archive.differing_notebooks(course.tasks), course.manifest_path.parent
+        )
         info = course.info
         changes: dict[str, Any] = {}
         if version is not None:

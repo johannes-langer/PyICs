@@ -4,11 +4,13 @@ interface, e.g. ``pull``.
 """
 
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import NoReturn
 
 from pyics.distribution import dependencies
 from pyics.distribution.dependencies import Problem
+from pyics.util import paths
 
 TRUST_WARNING = (
     "Courses run code on your computer: their tests run your code together with "
@@ -33,6 +35,22 @@ def confirm(question: str, *, default: bool = False) -> bool:
     if not answer:
         return default
     return answer in ("y", "yes")
+
+
+def warn_differing_notebooks(
+    differing: Mapping[Path, Sequence[Path]], base: Path
+) -> None:
+    """Warn that tasks share notebooks, but store different contents for them (see
+    ``archive.differing_notebooks``). Paths are shown relative to ``base``."""
+    for notebook, task_files in differing.items():
+        tasks = ", ".join(paths.relative_to(f, base).as_posix() for f in task_files)
+        print(
+            f"Warning: the tasks {tasks} share the notebook "
+            f"{paths.relative_to(notebook, base).as_posix()}, but store different "
+            "contents for it. Students get the contents of the task they start first: "
+            "store the same notebook in all of them (choose Update for it in "
+            "edit_task)."
+        )
 
 
 def report_problems(title: str, problems: Sequence[Problem]) -> None:

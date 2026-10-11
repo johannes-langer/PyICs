@@ -14,13 +14,14 @@ import re
 import threading
 import time
 from collections.abc import Callable, Iterator
+from contextlib import nullcontext
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from notebook_helpers import code, make_notebook, markdown, write_notebook
+from notebook_helpers import code, make_notebook, markdown, stream, write_notebook
 from rich.console import Console
 
 from pyics.app.cli import CLI
@@ -35,12 +36,14 @@ from pyics.notebook.sections import (
     get_section,
     is_name,
 )
+from pyics.scripts import edit_task
 from pyics.scripts.create_task import (
     _TEST_TYPES,
     _prompt_sections,
     _prompt_test,
     _task_flow,
 )
+from pyics.scripts.pack import _pack
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin, RichFailureRepr
 from pyics.tests.tests import (
     INHERIT,
@@ -785,3 +788,80 @@ def test_editing_prefills_the_section_of_a_test(lecture: Path) -> None:
         ),
     )
     assert test.section == "ex3"
+
+
+# --- pack and edit_task ---
+
+
+def _differing_course(root: Path) -> tuple[Path, Path]:
+    """The course of ``_shared_course``, whose second task stores another version of
+    the notebook. Returns the manifest and the second task's file."""
+    manifest, nb = _shared_course(root, LECTURE)
+    ex2 = root / ".tasks/ex2.pyicstask.json"
+    fields = Task.read_task_json(ex2)
+    changed = make_notebook([*copy.deepcopy(LECTURE), "print('one more cell')"])
+    fields["file_contents"][nb] = std_json.dumps(changed)
+    Task.create_task_json(ex2, **fields)
+    return manifest, ex2
+
+
+def test_pack_warns_about_tasks_storing_different_notebooks(
+    chdir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest, _ = _differing_course(chdir)
+    _pack(manifest, chdir / "out.zip", version="1.0.0", yes=True)
+    out = capsys.readouterr().out
+    assert (
+        "Warning: the tasks .tasks/ex1.pyicstask.json, .tasks/ex2.pyicstask.json "
+        "share the notebook lecture.ipynb, but store different contents for it."
+    ) in out
+    assert (chdir / "out.zip").is_file()  # packed nonetheless
+
+
+def test_pack_compares_notebooks_normalized(
+    chdir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest, _ = _shared_course(chdir, LECTURE)
+    ex2 = chdir / ".tasks/ex2.pyicstask.json"
+    data = std_json.loads(ex2.read_text())
+    # e.g. a task file stored before notebooks were normalized: with outputs
+    stored = _lecture()
+    stored["cells"][3]["outputs"] = [stream("9\n")]
+    data["exercise_code"] = [std_json.dumps(stored)]
+    ex2.write_text(std_json.dumps(data))
+    _pack(manifest, chdir / "out.zip", version="1.0.0", yes=True)
+    assert "Warning" not in capsys.readouterr().out
+
+
+def _edit_script(
+    monkeypatch: pytest.MonkeyPatch, keys: list[str], task_file: Path
+) -> None:
+    q: queue.Queue[str] = queue.Queue()
+    for key in [*keys, CTRL_C]:
+        q.put(key)
+    monkeypatch.setattr(edit_task, "CLI", MagicMock)
+    monkeypatch.setattr(edit_task, "KeyListener", lambda: nullcontext(q))
+    edit_task._edit_task(task_file)
+    assert q.get_nowait() == CTRL_C, "script finished before all keys were used"
+
+
+def test_edit_task_warns_about_tasks_storing_different_notebooks(
+    chdir: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, ex2 = _differing_course(chdir)
+    ex1 = chdir / ".tasks/ex1.pyicstask.json"
+    _edit_script(monkeypatch, KEEP_ALL, ex1)
+    out = capsys.readouterr().out
+    assert f"Task written to {ex1}" in out
+    assert "share the notebook lecture.ipynb, but store different contents" in out
+
+    # stored the same in both once updated: the notebook on disk is ex2's
+    write_notebook(chdir / "lecture.ipynb", std_json.loads(
+        Task.read_task_json(ex2)["file_contents"][chdir / "lecture.ipynb"]
+    ))  # fmt: skip
+    _edit_script(
+        monkeypatch,
+        [*KEEP_ALL[:3], DOWN, ENTER, *KEEP_ALL[4:]],  # update the notebook
+        ex1,
+    )
+    assert "Warning" not in capsys.readouterr().out
