@@ -1,0 +1,225 @@
+{
+    "name": "Breadth-First Search",
+    "instructions": "Implement breadth-first search using a non-recursive queue-based approach.",
+    "help": [
+        "Keep the paths that are still to be explored in a queue (a list): take them from the front with pop(0), and add new ones at the back with append.",
+        "Start with a queue that holds the path (start,). Take the first path: if it ends at the goal, return it. Otherwise, add one longer path for each neighbor of its last node.",
+        "Skip neighbors that are already on the path, so you don't walk in circles. If the queue runs empty, there is no path: return None."
+    ],
+    "ex_files": [
+        {
+            "__pathlib__": "../search_algorithms.ipynb"
+        }
+    ],
+    "sol_files": [
+        {
+            "__pathlib__": "../.solutions/search_algorithms.ipynb"
+        }
+    ],
+    "sections": {
+        "../search_algorithms.ipynb": "bfs"
+    },
+    "exercise_code": [
+        "{\n \"cells\": [\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"7c8e66fc\",\n   \"metadata\": {},\n   \"source\": [\n    \"# Search Algorithms\\n\",\n    \"\\n\",\n    \"In this notebook you implement two uninformed search algorithms on a small weighted\\n\",\n    \"graph: depth-first search and breadth-first search.\\n\",\n    \"\\n\",\n    \"Keep the PyICs app open in a terminal next to the notebook (run `pyics` in this\\n\",\n    \"course's directory, e.g. in JupyterLab's or VS Code's terminal). It shows the tests of\\n\",\n    \"the current exercise. **Save the notebook** (Ctrl-S) to check your work: your progress\\n\",\n    \"counts what is saved. With the *Python (pyics)* kernel (`pyics install_kernel`), the\\n\",\n    \"app also shows live results each time you run a cell.\"\n   ]\n  },\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"9e85852e\",\n   \"metadata\": {},\n   \"source\": [\n    \"## The graph\\n\",\n    \"\\n\",\n    \"The graph is a list of edges `(from, to, cost)`. Every road goes both ways, so each\\n\",\n    \"edge is listed in both directions. `neighbors` returns the successors of a node in\\n\",\n    \"alphabetical order, which is the order your searches should try them in.\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"3b40ac87\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"import operator\\n\",\n    \"\\n\",\n    \"GRAPH: list[tuple[str, str, int]] = [\\n\",\n    \"    (\\\"A\\\", \\\"B\\\", 4), (\\\"A\\\", \\\"E\\\", 10), (\\\"B\\\", \\\"C\\\", 5), (\\\"B\\\", \\\"D\\\", 2), (\\\"B\\\", \\\"E\\\", 6),\\n\",\n    \"    (\\\"D\\\", \\\"E\\\", 1), (\\\"D\\\", \\\"F\\\", 3), (\\\"E\\\", \\\"F\\\", 6), (\\\"E\\\", \\\"G\\\", 1),\\n\",\n    \"    (\\\"B\\\", \\\"A\\\", 4), (\\\"E\\\", \\\"A\\\", 10), (\\\"C\\\", \\\"B\\\", 5), (\\\"D\\\", \\\"B\\\", 2), (\\\"E\\\", \\\"B\\\", 6),\\n\",\n    \"    (\\\"E\\\", \\\"D\\\", 1), (\\\"F\\\", \\\"D\\\", 3), (\\\"F\\\", \\\"E\\\", 6), (\\\"G\\\", \\\"E\\\", 1),\\n\",\n    \"]\\n\",\n    \"\\n\",\n    \"\\n\",\n    \"def neighbors(graph: list[tuple[str, str, int]], node: str) -> list[str]:\\n\",\n    \"    \\\"\\\"\\\"Return the successors of a node.\\\"\\\"\\\"\\n\",\n    \"    return sorted(map(operator.itemgetter(1), filter(lambda x: x[0] == node, graph)))\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"00960e29\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"neighbors(GRAPH, \\\"B\\\")\"\n   ]\n  },\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"eb08e920\",\n   \"metadata\": {\n    \"tags\": [\n     \"pyics:dfs\"\n    ]\n   },\n   \"source\": [\n    \"<!-- pyics: dfs -->\\n\",\n    \"## Exercise 1: Depth-First Search\\n\",\n    \"\\n\",\n    \"Implement depth-first search using a **non-recursive, stack-based** approach.\\n\",\n    \"`depth_first_search` returns the path from `start` to `goal` as a tuple of nodes, or\\n\",\n    \"`None` if there is none. Add cells below this one as you like: they all belong to this\\n\",\n    \"exercise, up to the next exercise's heading.\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"f5e18896\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"# TODO: implement the depth-first-search algorithm using a non-recursive stack-based approach\\n\",\n    \"\\n\",\n    \"\\n\",\n    \"def depth_first_search(\\n\",\n    \"    graph: list[tuple[str, str, int]], start: str, goal: str\\n\",\n    \") -> list | None:\\n\",\n    \"    \\\"\\\"\\\"Return a path from start to goal using depth-first search.\\\"\\\"\\\"\\n\",\n    \"    ...\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"4a68871d\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"depth_first_search(GRAPH, \\\"A\\\", \\\"G\\\")\"\n   ]\n  },\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"abd3ffae\",\n   \"metadata\": {\n    \"tags\": [\n     \"pyics:bfs\"\n    ]\n   },\n   \"source\": [\n    \"<!-- pyics: bfs -->\\n\",\n    \"## Exercise 2: Breadth-First Search\\n\",\n    \"\\n\",\n    \"Implement breadth-first search using a **non-recursive, queue-based** approach.\\n\",\n    \"`breadth_first_search` returns the path from `start` to `goal` as a tuple of nodes, or\\n\",\n    \"`None` if there is none.\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"44e3040a\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"# TODO: implement the breadth-first-search algorithm using a non-recursive queue-based approach\\n\",\n    \"\\n\",\n    \"\\n\",\n    \"def breadth_first_search(\\n\",\n    \"    graph: list[tuple[str, str, int]], start: str, goal: str\\n\",\n    \") -> list[str] | None:\\n\",\n    \"    \\\"\\\"\\\"Return a path from start to goal using breadth-first search.\\\"\\\"\\\"\\n\",\n    \"    ...\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"e6e073e4\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"breadth_first_search(GRAPH, \\\"A\\\", \\\"G\\\")\"\n   ]\n  }\n ],\n \"metadata\": {\n  \"kernelspec\": {\n   \"display_name\": \"Python (pyics)\",\n   \"language\": \"python\",\n   \"name\": \"pyics\"\n  }\n },\n \"nbformat\": 4,\n \"nbformat_minor\": 5\n}\n"
+    ],
+    "solution_code": [
+        "{\n \"cells\": [\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"7c8e66fc\",\n   \"metadata\": {},\n   \"source\": [\n    \"# Search Algorithms\\n\",\n    \"\\n\",\n    \"In this notebook you implement two uninformed search algorithms on a small weighted\\n\",\n    \"graph: depth-first search and breadth-first search.\\n\",\n    \"\\n\",\n    \"Keep the PyICs app open in a terminal next to the notebook (run `pyics` in this\\n\",\n    \"course's directory, e.g. in JupyterLab's or VS Code's terminal). It shows the tests of\\n\",\n    \"the current exercise. **Save the notebook** (Ctrl-S) to check your work: your progress\\n\",\n    \"counts what is saved. With the *Python (pyics)* kernel (`pyics install_kernel`), the\\n\",\n    \"app also shows live results each time you run a cell.\"\n   ]\n  },\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"9e85852e\",\n   \"metadata\": {},\n   \"source\": [\n    \"## The graph\\n\",\n    \"\\n\",\n    \"The graph is a list of edges `(from, to, cost)`. Every road goes both ways, so each\\n\",\n    \"edge is listed in both directions. `neighbors` returns the successors of a node in\\n\",\n    \"alphabetical order, which is the order your searches should try them in.\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"3b40ac87\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"import operator\\n\",\n    \"\\n\",\n    \"GRAPH: list[tuple[str, str, int]] = [\\n\",\n    \"    (\\\"A\\\", \\\"B\\\", 4), (\\\"A\\\", \\\"E\\\", 10), (\\\"B\\\", \\\"C\\\", 5), (\\\"B\\\", \\\"D\\\", 2), (\\\"B\\\", \\\"E\\\", 6),\\n\",\n    \"    (\\\"D\\\", \\\"E\\\", 1), (\\\"D\\\", \\\"F\\\", 3), (\\\"E\\\", \\\"F\\\", 6), (\\\"E\\\", \\\"G\\\", 1),\\n\",\n    \"    (\\\"B\\\", \\\"A\\\", 4), (\\\"E\\\", \\\"A\\\", 10), (\\\"C\\\", \\\"B\\\", 5), (\\\"D\\\", \\\"B\\\", 2), (\\\"E\\\", \\\"B\\\", 6),\\n\",\n    \"    (\\\"E\\\", \\\"D\\\", 1), (\\\"F\\\", \\\"D\\\", 3), (\\\"F\\\", \\\"E\\\", 6), (\\\"G\\\", \\\"E\\\", 1),\\n\",\n    \"]\\n\",\n    \"\\n\",\n    \"\\n\",\n    \"def neighbors(graph: list[tuple[str, str, int]], node: str) -> list[str]:\\n\",\n    \"    \\\"\\\"\\\"Return the successors of a node.\\\"\\\"\\\"\\n\",\n    \"    return sorted(map(operator.itemgetter(1), filter(lambda x: x[0] == node, graph)))\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"00960e29\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"neighbors(GRAPH, \\\"B\\\")\"\n   ]\n  },\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"eb08e920\",\n   \"metadata\": {\n    \"tags\": [\n     \"pyics:dfs\"\n    ]\n   },\n   \"source\": [\n    \"<!-- pyics: dfs -->\\n\",\n    \"## Exercise 1: Depth-First Search\\n\",\n    \"\\n\",\n    \"Implement depth-first search using a **non-recursive, stack-based** approach.\\n\",\n    \"`depth_first_search` returns the path from `start` to `goal` as a tuple of nodes, or\\n\",\n    \"`None` if there is none. Add cells below this one as you like: they all belong to this\\n\",\n    \"exercise, up to the next exercise's heading.\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"f5e18896\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"def depth_first_search(\\n\",\n    \"    graph: list[tuple[str, str, int]], start: str, goal: str\\n\",\n    \") -> tuple[str, ...] | None:\\n\",\n    \"    \\\"\\\"\\\"Return a path from start to goal using depth-first search.\\\"\\\"\\\"\\n\",\n    \"    stack = []\\n\",\n    \"    stack.append((start,))\\n\",\n    \"    while stack:\\n\",\n    \"        path = stack.pop()\\n\",\n    \"        node = path[-1]\\n\",\n    \"        if node == goal:\\n\",\n    \"            return path\\n\",\n    \"        for neighbor in reversed(neighbors(graph, node)):\\n\",\n    \"            if neighbor in path:\\n\",\n    \"                continue\\n\",\n    \"            stack.append(path + (neighbor,))\\n\",\n    \"    return None\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"4a68871d\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"depth_first_search(GRAPH, \\\"A\\\", \\\"G\\\")\"\n   ]\n  },\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"abd3ffae\",\n   \"metadata\": {\n    \"tags\": [\n     \"pyics:bfs\"\n    ]\n   },\n   \"source\": [\n    \"<!-- pyics: bfs -->\\n\",\n    \"## Exercise 2: Breadth-First Search\\n\",\n    \"\\n\",\n    \"Implement breadth-first search using a **non-recursive, queue-based** approach.\\n\",\n    \"`breadth_first_search` returns the path from `start` to `goal` as a tuple of nodes, or\\n\",\n    \"`None` if there is none.\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"44e3040a\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"def breadth_first_search(\\n\",\n    \"    graph: list[tuple[str, str, int]], start: str, goal: str\\n\",\n    \") -> tuple[str, ...] | None:\\n\",\n    \"    \\\"\\\"\\\"Return a path from start to goal using breadth-first search.\\\"\\\"\\\"\\n\",\n    \"    queue = []\\n\",\n    \"    queue.append((start,))\\n\",\n    \"    while queue:\\n\",\n    \"        path = queue.pop(0)\\n\",\n    \"        node = path[-1]\\n\",\n    \"        if node == goal:\\n\",\n    \"            return path\\n\",\n    \"        for neighbor in neighbors(graph, node):\\n\",\n    \"            if neighbor in path:\\n\",\n    \"                continue\\n\",\n    \"            queue.append(path + (neighbor,))\\n\",\n    \"    return None\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"e6e073e4\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"breadth_first_search(GRAPH, \\\"A\\\", \\\"G\\\")\"\n   ]\n  }\n ],\n \"metadata\": {\n  \"kernelspec\": {\n   \"display_name\": \"Python (pyics)\",\n   \"language\": \"python\",\n   \"name\": \"pyics\"\n  }\n },\n \"nbformat\": 4,\n \"nbformat_minor\": 5\n}\n"
+    ],
+    "tests": [
+        {
+            "__instance_type__": [
+                "pyics.tests.tests",
+                "SimpleTest"
+            ],
+            "slots": {},
+            "attributes": {
+                "name": "Search path test",
+                "file_path": {
+                    "__pathlib__": "../search_algorithms.ipynb"
+                },
+                "function_name": "breadth_first_search",
+                "expected": {
+                    "__tuple__": [
+                        "A",
+                        "E",
+                        "G"
+                    ]
+                },
+                "function_args": [
+                    [
+                        {
+                            "__tuple__": [
+                                "A",
+                                "B",
+                                4
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "A",
+                                "E",
+                                10
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "B",
+                                "C",
+                                5
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "B",
+                                "D",
+                                2
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "B",
+                                "E",
+                                6
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "D",
+                                "E",
+                                1
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "D",
+                                "F",
+                                3
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "E",
+                                "F",
+                                6
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "E",
+                                "G",
+                                1
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "B",
+                                "A",
+                                4
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "E",
+                                "A",
+                                10
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "C",
+                                "B",
+                                5
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "D",
+                                "B",
+                                2
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "E",
+                                "B",
+                                6
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "E",
+                                "D",
+                                1
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "F",
+                                "D",
+                                3
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "F",
+                                "E",
+                                6
+                            ]
+                        },
+                        {
+                            "__tuple__": [
+                                "G",
+                                "E",
+                                1
+                            ]
+                        }
+                    ],
+                    "A",
+                    "G"
+                ],
+                "function_kwargs": {}
+            }
+        },
+        {
+            "__instance_type__": [
+                "pyics.tests.tests",
+                "SpecTest"
+            ],
+            "slots": {},
+            "attributes": {
+                "name": "Signature Check",
+                "file_path": {
+                    "__pathlib__": "../search_algorithms.ipynb"
+                },
+                "symbol_name": "breadth_first_search",
+                "expected": {
+                    "is_class": false,
+                    "graph": "list[tuple[str, str, int]]",
+                    "start": "str",
+                    "goal": "str",
+                    "return": "tuple[str, ...] | None"
+                },
+                "by_type": false
+            }
+        },
+        {
+            "__instance_type__": [
+                "pyics.tests.tests",
+                "StructureTest"
+            ],
+            "slots": {},
+            "attributes": {
+                "name": "No-Recursion Check",
+                "file_path": {
+                    "__pathlib__": "../search_algorithms.ipynb"
+                },
+                "rules": [
+                    {
+                        "concept": "recursion",
+                        "max": 0
+                    }
+                ]
+            }
+        }
+    ]
+}

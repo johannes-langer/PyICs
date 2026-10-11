@@ -1,0 +1,15 @@
+{
+    "name": "Search Algorithms (Notebook)",
+    "tasks": {
+        "Depth-First Search": {
+            "__pathlib__": ".tasks/dfs.pyicstask.json"
+        },
+        "Breadth-First Search": {
+            "__pathlib__": ".tasks/bfs.pyicstask.json"
+        }
+    },
+    "progress": [
+        0,
+        0
+    ]
+}
