@@ -33,8 +33,10 @@ from notebook_helpers import (
 from rich.console import Console
 from rich.text import Text
 
+import pyics.util.json_handling as json
 from pyics.app.prompts import PromptSession
 from pyics.data import Course, Task
+from pyics.distribution import dependencies
 from pyics.notebook import cells, loader
 from pyics.notebook.cells import Cell, NotebookError
 from pyics.scripts.create_task import _edit_files
@@ -634,6 +636,29 @@ def test_check_structure_names_lines_with_locate() -> None:
     assert check_structure(
         rules, "def f(:\n", filename="ex.ipynb", locate=locate, use_rich_markup=False
     ) == ["Could not parse 'ex.ipynb': invalid syntax (cell 2, line 1)."]
+
+
+# --- finding the packages a course uses ---
+
+
+def test_used_modules_finds_the_imports_of_notebooks(chdir: Path) -> None:
+    ex = write_notebook(
+        chdir / "ex.ipynb",
+        [
+            markdown("import markdown_is_not_code"),
+            "%matplotlib inline\n%pip install numpy\nimport numpy as np",
+            "!ls\nfrom fakepkg import Point",
+            "def unfinished(:\n    import yaml",
+        ],
+    )
+    sol = write_notebook(chdir / "sol.ipynb", ["%%time\nimport pandas as pd"])
+    task_file = Task.create_task_json(chdir / "t", "T", "", ex, sol)
+    tasks = {"t.pyicstask.json": json.load_plain(task_file)}
+    assert dependencies.used_modules(tasks) == {
+        "numpy": {"t.pyicstask.json"},
+        "fakepkg": {"t.pyicstask.json"},
+        "pandas": {"t.pyicstask.json"},
+    }
 
 
 # --- the app: rerunning the tests when a notebook is saved ---
