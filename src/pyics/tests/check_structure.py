@@ -107,6 +107,7 @@ def check_structure(
     *,
     filename: str = "",
     use_rich_markup: bool = True,
+    locate: Callable[[int], str] | None = None,
 ) -> list[str]:
     """
     Check ``source`` against ``rules``.
@@ -122,6 +123,9 @@ def check_structure(
     use_rich_markup: bool (optional, keyword only)
         Use ``rich`` markup in messages for additional highlighting.
         Default True.
+    locate: Callable[[int], str] | None (optional, keyword only)
+        Where a line of ``source`` (from 1) is, as messages name it, e.g. "cell 3, line
+        2" for the source of a notebook's cells. By default "line N".
 
     Returns
     -------
@@ -139,9 +143,10 @@ def check_structure(
         tree = ast.parse(source, filename or "<unknown>")
     except SyntaxError as err:
         what = o.q(filename) if filename else "the source"
-        return [f"Could not parse {what}: {err.msg} (line {err.lineno})."]
+        where = locate(err.lineno) if locate and err.lineno else f"line {err.lineno}"
+        return [f"Could not parse {what}: {err.msg} ({where})."]
 
-    ctx = _Context(tree, o)
+    ctx = _Context(tree, o, locate)
     messages = []
     for rule in rules:
         try:
@@ -628,9 +633,12 @@ class _Markup:
 
 
 class _Context:
-    def __init__(self, tree: ast.Module, o: _Markup):
+    def __init__(
+        self, tree: ast.Module, o: _Markup, locate: Callable[[int], str] | None = None
+    ):
         self.tree = tree
         self.o = o
+        self.locate = locate
         self._nodes: dict[str | None, list[ast.AST]] = {}
 
     @cached_property
@@ -713,7 +721,8 @@ def _bullets(items) -> list[str]:
     ]
 
 
-def _found(nodes: list[ast.AST], o: _Markup) -> str:
+def _found(nodes: list[ast.AST], ctx: _Context) -> str:
+    o = ctx.o
     if not nodes:
         return "none"
     lines = sorted(
@@ -721,6 +730,8 @@ def _found(nodes: list[ast.AST], o: _Markup) -> str:
     )
     if not lines:
         return o.b(len(nodes))
+    if ctx.locate is not None:
+        return f"{o.b(len(nodes))} ({'; '.join(map(ctx.locate, lines))})"
     label = "line" if len(lines) == 1 else "lines"
     return f"{o.b(len(nodes))} ({label} {', '.join(map(str, lines))})"
 
@@ -750,7 +761,7 @@ def _evaluate(rule: Rule, ctx: _Context, scope: str | None) -> list[str]:
         if lo <= len(found) and (hi is None or len(found) <= hi):
             return []
         messages = [
-            f"Expected {_requirement(rule, o, scope)}, found {_found(found, o)}."
+            f"Expected {_requirement(rule, o, scope)}, found {_found(found, ctx)}."
         ]
 
     if messages and "message" in rule:

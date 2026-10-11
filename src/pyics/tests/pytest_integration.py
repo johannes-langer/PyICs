@@ -11,6 +11,7 @@ from rich.errors import MarkupError
 from rich.style import Style
 from rich.text import Text
 
+from pyics.notebook import loader
 from pyics.tests import Test
 from pyics.tests.results import TestResult
 from pyics.tests.tests import MarkupAssertionError
@@ -55,15 +56,21 @@ class PyicsItem(pytest.Item):
         # if it fails
         self.tracing = tracing
         self.recorded_trace: Trace | None = None
+        # the errors in the cells of a notebook the test ran, named if it fails
+        self.cell_errors: list[loader.CellError] = []
         super().__init__(name=self.test_obj.name, parent=parent)
 
     def runtest(self) -> None:
-        if not (self.tracing and self.test_obj.supports_trace):
-            self.test_obj.run()
-            return
-        # tests whose authors don't allow it ignore the trace
-        self.recorded_trace = Trace()
-        self.test_obj.run(trace=self.recorded_trace)
+        loader.clear_last_errors()
+        try:
+            if not (self.tracing and self.test_obj.supports_trace):
+                self.test_obj.run()
+                return
+            # tests whose authors don't allow it ignore the trace
+            self.recorded_trace = Trace()
+            self.test_obj.run(trace=self.recorded_trace)
+        finally:
+            self.cell_errors = loader.last_errors()
 
     def repr_failure(
         self,
@@ -83,6 +90,8 @@ class PyicsItem(pytest.Item):
                 message = Text.from_markup(str(excinfo.value), emoji=False)
             except MarkupError:
                 pass  # shown as it is, rather than failing the whole run
+        for error in self.cell_errors:  # which may be why the test failed
+            message = Text.assemble(message, "\n", error.describe())
         return RichFailureRepr(
             Text.assemble(f"{self.name} failed: ", message), self._trace_ansi()
         )

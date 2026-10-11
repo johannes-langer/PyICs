@@ -18,6 +18,7 @@ import subprocess
 import sys
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from os import PathLike
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
+from pyics.notebook import cells, loader
 from pyics.util import json_handling as json
 
 # always available to a course: pyics itself, and the standard library
@@ -352,6 +354,17 @@ def imported_modules(code: str) -> set[str]:
     return modules
 
 
+def _python_code(code: str, file: object) -> str:
+    """``code``, the contents stored for ``file``, as Python: for a notebook, the code
+    of its cells, with magics turned into Python (see ``loader.python_source``)."""
+    if not isinstance(file, str | PathLike) or not cells.is_notebook(file):
+        return code
+    try:
+        return loader.python_source(cells.parse(code)).source
+    except cells.NotebookError:
+        return ""
+
+
 def used_modules(
     tasks: Mapping[str, Any], local: Collection[str] = ()
 ) -> dict[str, set[str]]:
@@ -359,7 +372,8 @@ def used_modules(
     The top-level modules besides pyics and the standard library that the task data
     of ``tasks`` (by task file name, as read by ``json_handling.loads_plain``) use: to
     decode the objects stored in them, and imported by their exercise and solution
-    code. Modules of the course itself (``local``) are left out.
+    code (of notebooks, by their code cells). Modules of the course itself (``local``)
+    are left out.
 
     Returns
     -------
@@ -371,10 +385,14 @@ def used_modules(
         tags = json.scan_tags(data)
         modules = {_top_level(m) for m in tags.modules if m is not None}
         modules |= tags.packages
-        for key in ("exercise_code", "solution_code"):
-            for code in data.get(key) or []:
+        code_keys = (("exercise_code", "ex_files"), ("solution_code", "sol_files"))
+        for key, files_key in code_keys:
+            files = data.get(files_key)
+            files = files if isinstance(files, list) else []
+            for i, code in enumerate(data.get(key) or []):
                 if isinstance(code, str):
-                    modules |= imported_modules(code)
+                    file = files[i] if i < len(files) else None
+                    modules |= imported_modules(_python_code(code, file))
         for module in modules - _ALWAYS_ALLOWED - set(local) - {"__future__"}:
             used.setdefault(module, set()).add(name)
     return used
