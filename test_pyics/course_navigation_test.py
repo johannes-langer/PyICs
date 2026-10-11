@@ -37,6 +37,9 @@ class _FakeTask:
     def setup(self) -> None:
         self.is_set_up = True
 
+    def leave(self) -> None:
+        pass
+
     def check_solved(self) -> bool:
         self.checked.append(self.path)
         self.on_check(self.path)

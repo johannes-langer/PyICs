@@ -9,6 +9,7 @@ them as progress. The kernel is played by a ``KernelChannel`` writing hand-made
 import io
 import json
 import os
+import shutil
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -627,6 +628,44 @@ def test_t_asks_the_notebook_kernels_to_trace(
 
 def test_watching_a_notebook_creates_no_channel(task: Task, notebook: Path) -> None:
     task.check_live_results()
+    assert not channel_dir(notebook).parent.exists()
+
+
+def _on_the_notebook_task(task_file: Path, chdir: Path) -> Course:
+    """The course of ``manifest`` the other way round, on the notebook task, which
+    follows the solved Python task."""
+    tasks = {"Double": chdir / ".tasks/double.pyicstask.json", "Add": task_file}
+    course = Course(name="c", tasks=tasks, progress=[1, 0])
+    assert course.instructions == "Implement add."
+    return course
+
+
+def test_moving_to_another_task_stops_the_kernels_tracing(
+    task_file: Path, manifest: Path, chdir: Path, notebook: Path, no_new_threads: None
+) -> None:
+    control = channel_dir(notebook) / "control.json"
+    course = _on_the_notebook_task(task_file, chdir)
+    course.toggle_tracing()
+    assert read_json(control) == {"tracing": True, "paused": False}
+
+    course.previous()
+    assert course.instructions == "Implement double."
+    assert read_json(control) == {"tracing": False, "paused": False}
+
+
+def test_leaving_a_task_creates_no_channel(
+    task_file: Path, manifest: Path, chdir: Path, notebook: Path, no_new_threads: None
+) -> None:
+    course = _on_the_notebook_task(task_file, chdir)
+    course.tick()  # watches the notebook's channel
+    course.previous()
+    assert not channel_dir(notebook).parent.exists()
+
+    # tracing, but its channel was removed since
+    course = _on_the_notebook_task(task_file, chdir)
+    course.toggle_tracing()
+    shutil.rmtree(channel_dir(notebook).parent)
+    course.leave()
     assert not channel_dir(notebook).parent.exists()
 
 

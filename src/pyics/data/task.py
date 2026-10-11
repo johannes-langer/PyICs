@@ -598,33 +598,50 @@ class Task:
         """Turn ``tracing`` on or off, and run the tests again to show the change. The
         kernels of the task's notebooks trace their next live runs, too (or stop)."""
         self.__tracing = not self.__tracing
-        for notebook, reader in self.__open_channels().items():
-            try:
-                reader.write_control(tracing=self.__tracing)
-            except Exception:  # noqa: BLE001
-                get_logger(__name__).warning(
-                    f"Can't ask the kernels of {notebook} to trace", exc_info=True
-                )
+        self.__ask_kernels(self.__open_channels(), tracing=self.__tracing)
         self.run_tests()
+
+    def leave(self) -> None:
+        """
+        Ask the kernels of the task's notebooks to stop tracing, if the task traces (see
+        ``toggle_tracing``), as the TUI leaves the task: for another task, for the
+        course selector, or when it quits. The task itself keeps tracing, and asks the
+        kernels to trace again when it is resumed (see ``resume``).
+        """
+        if self.__tracing and self.__channels is not None:
+            self.__ask_kernels(self.__channels, tracing=False)
+
+    def resume(self) -> None:
+        """Ask the kernels of the task's notebooks to trace again if the task traces,
+        as the TUI returns to it after leaving it (see ``leave``)."""
+        if self.__tracing:
+            self.__ask_kernels(self.__open_channels(), tracing=True)
 
     def __open_channels(self) -> dict[Path, ChannelReader]:
         """The channels of the task's notebooks, opened the first time. The kernels
         don't trace when a task is opened, as its own tests aren't traced either."""
         if self.__channels is None:
-            self.__channels = {}
-            for notebook in self.__notebooks:
-                reader = ChannelReader(notebook)
-                self.__channels[notebook] = reader
-                try:
-                    # only written if needed, so that no channel is created for it
-                    if reader.read_control().tracing:
-                        reader.write_control(tracing=False)
-                except Exception:  # noqa: BLE001
-                    get_logger(__name__).warning(
-                        f"Can't ask the kernels of {notebook} not to trace",
-                        exc_info=True,
-                    )
+            self.__channels = {
+                notebook: ChannelReader(notebook) for notebook in self.__notebooks
+            }
+            self.__ask_kernels(self.__channels, tracing=False)
         return self.__channels
+
+    @staticmethod
+    def __ask_kernels(channels: Mapping[Path, ChannelReader], *, tracing: bool) -> None:
+        """Ask the kernels of the notebooks of ``channels`` to trace their live runs, or
+        not to. Not tracing is only written if they were asked to trace, so that no
+        channel is created for it."""
+        for notebook, reader in channels.items():
+            try:
+                if tracing or reader.read_control().tracing:
+                    reader.write_control(tracing=tracing)
+            except Exception:  # noqa: BLE001
+                get_logger(__name__).warning(
+                    f"Can't ask the kernels of {notebook} "
+                    + ("to trace" if tracing else "not to trace"),
+                    exc_info=True,
+                )
 
     def check_live_results(self) -> bool:
         """

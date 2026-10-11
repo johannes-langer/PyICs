@@ -316,15 +316,18 @@ class PyIC:
             return
 
     def _enter_course(self, course: Course) -> None:
-        """Make ``course`` the current course, to be drawn as a whole."""
+        """Make ``course`` the current course, to be drawn as a whole, and resume it if
+        it was left (see ``Course.resume``)."""
         self.__current_course = course
         self.__previous_course = None
         self.__entered = True
+        course.resume()
 
     def leave_course(self) -> None:
         """Leave the current course for the course selector. The course keeps its
         state, and is resumed if it is selected again."""
         if self.__current_course is not None:
+            self.__current_course.leave()
             self.__previous_course = self.__current_course
             self.__current_course = None
 
@@ -385,6 +388,8 @@ class PyIC:
                 time.sleep(0.05)
         finally:
             self.running = False
+            if self.__current_course is not None:
+                self.__current_course.leave()
             for course in self.courses.values():
                 course.stop_progress_check(_SHUTDOWN_TIMEOUT)
             # the key listener restores the terminal mode once this returns

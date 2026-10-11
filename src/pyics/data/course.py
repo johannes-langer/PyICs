@@ -122,6 +122,8 @@ class Course:
         return Task(self.tasks[name], setup=setup, module_policy=self.__module_policy)
 
     def __set_current_task(self, task: Task) -> None:
+        if self.__current_task is not None and self.__current_task is not task:
+            self.__current_task.leave()
         self.__current_task = task
         self.__task_changed = True
 
@@ -181,6 +183,18 @@ class Course:
         unless the course is loading."""
         if self.__current_task is not None:
             self.__current_task.toggle_tracing()
+
+    def leave(self) -> None:
+        """Leave the current task, e.g. for the course selector, or when the app quits:
+        the kernels of its notebooks stop tracing (see ``Task.leave``)."""
+        if self.__current_task is not None:
+            self.__current_task.leave()
+
+    def resume(self) -> None:
+        """Return to the current task after leaving the course (see ``leave``): the
+        kernels of its notebooks trace again if it traces (see ``Task.resume``)."""
+        if self.__current_task is not None:
+            self.__current_task.resume()
 
     @property
     def loading(self) -> bool:

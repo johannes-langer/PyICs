@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from typing import NamedTuple
 
 import pytest
+from notebook_helpers import write_notebook
 from prompt_toolkit.input import PipeInput, create_pipe_input
 from prompt_toolkit.key_binding import KeyPress
 
@@ -26,6 +27,7 @@ from pyics.app.pyics import PyIC
 from pyics.data import Course, Task
 from pyics.distribution import archive
 from pyics.distribution.sources import Source
+from pyics.notebook.channel import channel_dir, read_json
 from pyics.scripts import main
 from pyics.tests.tests import PrintTest, SimpleTest, Test
 from pyics.util.terminal import ALT_SCREEN_ENTER, ALT_SCREEN_LEAVE, SHOW_CURSOR
@@ -464,6 +466,38 @@ def test_tracing_is_off_for_another_task(
     app.press("p")
     app.wait_for(lambda: "Implement add(a, b)." in app.screen)
     assert not app.course.tracing
+
+
+def test_notebook_kernels_trace_only_while_their_task_is_shown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, launch: Callable[[], App]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("pyics.notebook.kernelspec.is_installed", lambda: True)
+    notebook = write_notebook(tmp_path / "add.ipynb", [ADD_TEMPLATE])
+    test = SimpleTest("adds", notebook, "add", 3, function_args=[1, 2])
+    task_file = Task.create_task_json(
+        tmp_path / "add", "Add", "Implement add(a, b).", notebook, tests=test
+    )
+    Course.create_course_manifest(tmp_path / "course", [task_file])
+    control = channel_dir(notebook) / "control.json"
+
+    def tracing() -> bool:
+        return bool((read_json(control) or {}).get("tracing"))
+
+    app = launch()
+    app.select()
+    app.wait_for(lambda: "1 failed" in app.screen)
+    app.press("t")
+    app.wait_for(tracing)
+
+    app.press("c")  # the course selector
+    app.wait_for(lambda: app.selecting and not tracing())
+    app.press(ESC)  # back to the course, which still traces
+    app.wait_for(lambda: not app.selecting and tracing())
+    assert app.course.tracing
+
+    app.quit()
+    assert not tracing()
 
 
 # --- course selection ---
