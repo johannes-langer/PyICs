@@ -291,6 +291,27 @@ def test_editing_a_task_ignores_that_its_notebook_was_run(chdir: Path) -> None:
     assert "The file on disk differs from the stored contents" in shown
 
 
+def test_notebooks_are_diffed_as_the_text_of_their_cells(chdir: Path) -> None:
+    path = chdir / "ex.ipynb"
+    stored = cells.normalize(_notebook_text())
+    path.write_text(_run_notebook_text("print('hello')"))
+    shown = _edit_shows(path, stored)
+    assert "# %% cell 2" in shown
+    assert "-print('hi')" in shown and "+print('hello')" in shown
+    assert '"source"' not in shown and "outputs" not in shown
+
+    # e.g. a tag that starts a section: the cells read the same
+    retagged = make_notebook(
+        [markdown("# Greeting"), code("print('hi')", tags=["pyics:greet"])],
+        metadata={"title": "Greetings"},
+    )
+    path.write_text(notebook_text(retagged))
+    shown = _edit_shows(path, stored)
+    assert "Update" in shown
+    assert "Only its metadata differs (e.g. the tags of cells)" in shown
+    assert "# %%" not in shown
+
+
 # --- running notebooks ---
 
 

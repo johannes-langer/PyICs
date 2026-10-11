@@ -149,9 +149,22 @@ def _as_stored(path: PathLike, text: str | None) -> str | None:
         return text
 
 
-def _diff(stored: str, on_disk: str) -> RenderableType:
+def _diff(stored: str, on_disk: str, path: PathLike | None = None) -> RenderableType:
     """How a file ``on_disk`` differs from its ``stored`` contents, as a unified diff of
-    at most ``_MAX_DIFF_LINES`` lines."""
+    at most ``_MAX_DIFF_LINES`` lines. A notebook (by its ``path``) is compared by the
+    text of its cells (see ``cells.as_cell_text``) rather than as JSON."""
+    if path is not None and cells.is_notebook(path):
+        try:
+            stored, on_disk = cells.as_cell_text(stored), cells.as_cell_text(on_disk)
+        except cells.NotebookError:
+            pass  # compared as it is
+        else:
+            if stored == on_disk:
+                return Text(
+                    "Only its metadata differs (e.g. the tags of cells), not the text "
+                    "of its cells.",
+                    style="dim",
+                )
     lines = list(
         difflib.unified_diff(
             stored.splitlines(), on_disk.splitlines(), "stored", "on disk", lineterm=""
@@ -336,7 +349,7 @@ def _edit_files(
             if in_task is not None:
                 details = Group(
                     Text("The file on disk differs from the stored contents:"),
-                    _diff(in_task, on_disk),
+                    _diff(in_task, on_disk, path),
                 )
         if in_task is None and on_disk is None:
             details = Text(
