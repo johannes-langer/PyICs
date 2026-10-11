@@ -1,5 +1,20 @@
 """
-Links into a running JupyterLab that open an exercise notebook at a task's section.
+Links from the TUI's title to an exercise notebook: its path opens the notebook, and the
+title of the task's section opens it in a running JupyterLab, scrolled to the section.
+
+The links are OSC 8 hyperlinks (a rich ``link`` style). What clicking one does depends on
+the terminal the TUI runs in:
+
+- VS Code's integrated terminal (``TERM_PROGRAM=vscode``) makes the plain path clickable
+  and opens the notebook in VS Code, so the path isn't linked. VS Code can't open a
+  notebook at a cell from a link yet (microsoft/vscode-jupyter#16548), and a JupyterLab
+  link would open a second editor on the notebook, so the section isn't linked either.
+- A Jupyter server's terminal (JupyterLab, Notebook 7 and 6) sets ``JUPYTER_SERVER_ROOT``
+  and ``JUPYTER_SERVER_URL`` (``jupyter_server_terminals``). Its xterm.js ignores OSC 8
+  links that aren't http(s), so the path isn't linked, but the section links into
+  JupyterLab.
+- Other terminals get a ``file://`` link on the path, which opens the notebook with the
+  default application, and a JupyterLab link on the section if a server serves it.
 
 Jupyter servers don't open files in hidden directories (such as ``.exercises``) unless
 they run with ``--ContentsManager.allow_hidden=True``, which the TUI can't tell.
@@ -16,8 +31,13 @@ from pathlib import Path, PurePath
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from jupyter_core.paths import jupyter_runtime_dir
+from rich.style import Style
+from rich.text import Text
 
 from pyics.util.paths import StrPath
+
+# between an exercise path and the title of its task's section
+SECTION_SEPARATOR = " › "
 
 # The characters a browser keeps as they are in a URL's fragment: printable ASCII except
 # the URL standard's fragment percent-encode set (space, ", <, >, `). JupyterLab compares
@@ -162,6 +182,88 @@ def heading_anchor(heading: str) -> str:
         The heading's markdown, with or without its ``#`` markers.
     """
     return _rendered_text(heading).replace(" ", "-")
+
+
+def path_text(
+    path: StrPath, display: str, *, environ: Mapping[str, str] = os.environ
+) -> Text:
+    """
+    ``display`` (how the TUI shows ``path``) as an OSC 8 ``file://`` link to ``path``, or
+    as plain text in VS Code's terminal (which makes the plain path clickable) and in a
+    Jupyter server's terminal (whose xterm.js ignores ``file://`` links).
+    """
+    text = Text()
+    if _in_vscode(environ) or _in_jupyter_terminal(environ):
+        text.append(display)
+    else:
+        # a span rather than the text's base style, so text appended later isn't linked
+        text.append(display, style=Style(link=Path(os.path.abspath(path)).as_uri()))
+    return text
+
+
+def exercise_title(
+    path: StrPath,
+    display: str,
+    *,
+    section_title: str | None = None,
+    cell_id: str | None = None,
+    missing_section: str | None = None,
+    environ: Mapping[str, str] = os.environ,
+    runtime_dir: StrPath | None = None,
+) -> Text:
+    """
+    How the TUI's title shows an exercise file: its path (see ``path_text``), followed
+    for a notebook with a task section by ``› <section title>``, e.g.
+    ``.exercises/lecture.ipynb › Exercise 2: Breadth-First Search``.
+
+    The section title links into the JupyterLab that serves the notebook (see
+    ``find_server`` and ``section_url``), unless the TUI runs in VS Code's terminal.
+
+    Parameters
+    ----------
+    path: StrPath
+        The exercise file's path.
+    display: str
+        How the title shows the path.
+    section_title: str | None (optional, keyword only)
+        The title of the task's section in the notebook: its anchor cell's first
+        heading, else the section's name. It is the heading anchor if ``cell_id`` is
+        None. None for a file without a task section.
+    cell_id: str | None (optional, keyword only)
+        The id of the section's anchor cell, if it has one.
+    missing_section: str | None (optional, keyword only)
+        The name of the task's section if the notebook doesn't have it. The title then
+        says "section '<name>' not found" in red instead.
+    environ: Mapping[str, str] (optional, keyword only)
+        The environment the TUI runs in. Default is ``os.environ``.
+    runtime_dir: StrPath | None (optional, keyword only)
+        Where to look for running Jupyter servers (see ``find_server``).
+    """
+    title = path_text(path, display, environ=environ)
+    if missing_section is not None:
+        title.append(SECTION_SEPARATOR)
+        title.append(f"section '{missing_section}' not found", style="red")
+    elif section_title is not None:
+        title.append(SECTION_SEPARATOR)
+        server = None
+        if not _in_vscode(environ):
+            server = find_server(path, runtime_dir, environ=environ)
+        if server is None:
+            title.append(section_title)
+        else:
+            url = section_url(server, path, cell_id=cell_id, heading=section_title)
+            title.append(section_title, style=Style(link=url))
+    return title
+
+
+def _in_vscode(environ: Mapping[str, str]) -> bool:
+    """Whether the TUI runs in VS Code's integrated terminal."""
+    return environ.get("TERM_PROGRAM") == "vscode"
+
+
+def _in_jupyter_terminal(environ: Mapping[str, str]) -> bool:
+    """Whether the TUI runs in a terminal of a Jupyter server (JupyterLab, Notebook)."""
+    return bool(environ.get("JUPYTER_SERVER_ROOT") or environ.get("JUPYTER_SERVER_URL"))
 
 
 def _read_server(info_file: Path) -> JupyterServer | None:

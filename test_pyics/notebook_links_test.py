@@ -1,30 +1,42 @@
 """
-Links into JupyterLab (``pyics.notebook.links``): finding the server that serves a
-notebook, and its URLs to a task's section.
+Links from the TUI's title to exercise notebooks (``pyics.notebook.links``): finding the
+JupyterLab server that serves a notebook, its URLs to a task's section, ``file://``
+links on paths, and that the links survive the CLI's drawing.
 """
 
 import itertools
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from rich.console import Console
+from rich.text import Text
 
+from pyics.app.cli import CLI
 from pyics.notebook.links import (
     JupyterServer,
+    exercise_title,
     find_server,
     heading_anchor,
+    path_text,
     section_url,
 )
 
 LOCAL = "http://localhost:8888"
 
+PLAIN_TERMINAL: dict[str, str] = {"TERM_PROGRAM": "iTerm.app"}
+VSCODE: dict[str, str] = {"TERM_PROGRAM": "vscode"}
 JUPYTER_TERMINAL = {
     "JUPYTER_SERVER_ROOT": "/home/student",
     "JUPYTER_SERVER_URL": "http://localhost:8888/",
 }
+
+# OSC 8 hyperlinks as rich writes them: ESC ] 8 ; id=<id> ; <uri> ESC \
+OSC8 = re.compile(r"\x1b\]8;[^;]*;([^\x1b]*)\x1b\\")
 
 _names = itertools.count()
 
@@ -265,3 +277,200 @@ def test_heading_fallback_with_special_characters(tmp_path: Path) -> None:
 def test_heading_anchor(heading: str, anchor: str) -> None:
     """JupyterLab's rule: the heading's rendered text, with each space replaced by -."""
     assert heading_anchor(heading) == anchor
+
+
+# paths and titles
+
+
+def _links(text: Text) -> list[tuple[str, str | None]]:
+    """The parts of ``text`` and their links."""
+    return [
+        (text.plain[span.start : span.end], getattr(span.style, "link", None))
+        for span in text.spans
+    ]
+
+
+def test_path_is_a_file_link_in_other_terminals(tmp_path: Path) -> None:
+    path = tmp_path / "week 1" / "lecture.ipynb"
+    text = path_text(path, "week 1/lecture.ipynb", environ=PLAIN_TERMINAL)
+
+    assert text.plain == "week 1/lecture.ipynb"
+    [(_, uri)] = _links(text)
+    assert uri == path.as_uri()
+    assert uri is not None and uri.startswith("file://") and "week%201" in uri
+
+
+def test_relative_path_links_to_the_absolute_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    text = path_text(Path(".exercises/bfs.ipynb"), ".exercises/bfs.ipynb", environ={})
+    assert _links(text) == [
+        (".exercises/bfs.ipynb", (tmp_path / ".exercises" / "bfs.ipynb").as_uri())
+    ]
+
+
+@pytest.mark.parametrize(
+    "environ", [VSCODE, JUPYTER_TERMINAL], ids=["vscode", "jupyter"]
+)
+def test_path_is_plain_where_file_links_dont_help(
+    tmp_path: Path, environ: dict[str, str]
+) -> None:
+    """VS Code makes the plain path clickable, xterm.js ignores file:// links."""
+    text = path_text(tmp_path / "lecture.ipynb", "lecture.ipynb", environ=environ)
+    assert text.plain == "lecture.ipynb"
+    assert all(link is None for _, link in _links(text))
+
+
+def test_title_links_the_section_into_jupyterlab(runtime_dir: Path, root: Path) -> None:
+    write_server(runtime_dir, root)
+    notebook = root / "lecture.ipynb"
+
+    title = exercise_title(
+        notebook,
+        "lecture.ipynb",
+        section_title="Exercise 2: Breadth-First Search",
+        cell_id="c-1",
+        environ=PLAIN_TERMINAL,
+        runtime_dir=runtime_dir,
+    )
+
+    assert title.plain == "lecture.ipynb › Exercise 2: Breadth-First Search"
+    assert _links(title) == [
+        ("lecture.ipynb", notebook.as_uri()),
+        (
+            "Exercise 2: Breadth-First Search",
+            "http://localhost:8888/lab/tree/lecture.ipynb#cell-id=c-1",
+        ),
+    ]
+
+
+def test_title_in_the_jupyter_terminal(runtime_dir: Path, root: Path) -> None:
+    write_server(runtime_dir, root)
+    title = exercise_title(
+        root / "lecture.ipynb",
+        "lecture.ipynb",
+        section_title="Exercise 2",
+        cell_id="c-1",
+        environ=JUPYTER_TERMINAL,
+        runtime_dir=runtime_dir,
+    )
+    assert _links(title) == [
+        ("Exercise 2", "http://localhost:8888/lab/tree/lecture.ipynb#cell-id=c-1")
+    ]
+
+
+@pytest.mark.parametrize(
+    "environ", [PLAIN_TERMINAL, VSCODE], ids=["no server", "vscode"]
+)
+def test_title_without_a_section_link(
+    runtime_dir: Path, root: Path, environ: dict[str, str]
+) -> None:
+    """In VS Code, the notebook is edited in VS Code, even if a JupyterLab serves it."""
+    if environ is VSCODE:
+        write_server(runtime_dir, root)
+    title = exercise_title(
+        root / "lecture.ipynb",
+        "lecture.ipynb",
+        section_title="Exercise 2",
+        cell_id="c-1",
+        environ=environ,
+        runtime_dir=runtime_dir,
+    )
+    assert title.plain == "lecture.ipynb › Exercise 2"
+    assert not any(
+        link is not None and link.startswith("http") for _, link in _links(title)
+    )
+
+
+def test_title_of_a_missing_section(runtime_dir: Path, root: Path) -> None:
+    write_server(runtime_dir, root)
+    title = exercise_title(
+        root / "lecture.ipynb",
+        "lecture.ipynb",
+        missing_section="ex2",
+        environ=VSCODE,
+        runtime_dir=runtime_dir,
+    )
+    assert title.plain == "lecture.ipynb › section 'ex2' not found"
+    [span] = title.spans
+    assert title.plain[span.start : span.end] == "section 'ex2' not found"
+    assert span.style == "red"
+
+
+def test_title_of_a_file_without_section(tmp_path: Path) -> None:
+    title = exercise_title(tmp_path / "bfs.py", "bfs.py", environ=VSCODE)
+    assert title.plain == "bfs.py"
+
+
+# drawing
+
+
+@pytest.fixture
+def terminal_cli() -> CLI:
+    """A CLI whose console writes to a terminal, as it does in practice: rich only
+    writes styles and links to terminals, and pytest's captured output isn't one."""
+    cli = CLI()
+    cli.console = Console(
+        force_terminal=True,
+        color_system="truecolor",
+        legacy_windows=False,
+        width=100,
+        height=30,
+    )
+    return cli
+
+
+def _drawn_links(
+    cli: CLI, capsys: pytest.CaptureFixture[str], titles: list[Text]
+) -> list[str]:
+    """The targets of the links in the drawn interface, with the main panel's title
+    made of ``titles`` the way ``PyIC`` shows the exercise paths."""
+    cli.update_main_content(
+        Text("tests pending..."), Text(", ", style="dim").join(titles)
+    )
+    capsys.readouterr()
+    cli.draw_interface()
+    return [uri for uri in OSC8.findall(capsys.readouterr().out) if uri]
+
+
+def test_drawn_title_links_to_the_section(
+    terminal_cli: CLI, capsys: pytest.CaptureFixture[str], runtime_dir: Path, root: Path
+) -> None:
+    write_server(runtime_dir, root)
+    notebook = root / "lecture.ipynb"
+    title = exercise_title(
+        notebook,
+        "lecture.ipynb",
+        section_title="Exercise 2",
+        cell_id="c-1",
+        environ=PLAIN_TERMINAL,
+        runtime_dir=runtime_dir,
+    )
+    other = exercise_title(root / "helpers.py", "helpers.py", environ=PLAIN_TERMINAL)
+
+    links = _drawn_links(terminal_cli, capsys, [title, other])
+
+    assert "http://localhost:8888/lab/tree/lecture.ipynb#cell-id=c-1" in links
+    assert notebook.as_uri() in links
+    assert (root / "helpers.py").as_uri() in links
+
+
+def test_drawn_title_without_a_server_has_no_section_link(
+    terminal_cli: CLI, capsys: pytest.CaptureFixture[str], runtime_dir: Path, root: Path
+) -> None:
+    notebook = root / "lecture.ipynb"
+
+    def drawn_links(environ: dict[str, str]) -> set[str]:
+        title = exercise_title(
+            notebook,
+            "lecture.ipynb",
+            section_title="Exercise 2",
+            cell_id="c-1",
+            environ=environ,
+            runtime_dir=runtime_dir,
+        )
+        return set(_drawn_links(terminal_cli, capsys, [title]))
+
+    assert drawn_links(PLAIN_TERMINAL) == {notebook.as_uri()}
+    assert drawn_links(VSCODE) == set()
