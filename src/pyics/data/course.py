@@ -276,6 +276,16 @@ class Course:
             return []
         return self.__current_task.exercise_files
 
+    @property
+    def sections(self) -> dict[Path, str]:
+        """
+        The current task's sections: the section of each of its exercise notebooks that
+        it is about, by the notebook's absolute path (see ``Task.sections``).
+        """
+        if self.__current_task is None:
+            return {}
+        return self.__current_task.sections
+
     def __current_task_number(self) -> int:
         """The current task's position in the course."""
         assert self.__current_task is not None

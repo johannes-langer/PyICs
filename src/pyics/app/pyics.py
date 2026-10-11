@@ -33,6 +33,7 @@ from pyics.distribution.archive import ORIGIN_FILE, ArchiveError
 from pyics.distribution.dependencies import Problem
 from pyics.distribution.pull import PullError, pull
 from pyics.distribution.sources import CourseEntry, Source
+from pyics.notebook import cells, links, sections
 from pyics.util import paths
 from pyics.util.discovery import COURSE_SUFFIX, find_courses
 
@@ -57,6 +58,31 @@ class _SourceCourse:
 
     source: Source
     entry: CourseEntry
+
+
+def _exercise_title(path: Path, section: str | None) -> Text:
+    """
+    How the main panel's title shows the exercise file at ``path``: its path, and for a
+    notebook whose task is about its ``section``, the section's title. A notebook's
+    path and section title are links where the terminal supports them (see
+    ``links.exercise_title``). The section is looked up in the saved notebook, so the
+    title follows it when its cells are moved.
+    """
+    display = path.as_posix()
+    if not cells.is_notebook(path):
+        return Text(display)
+    if section is None:
+        return links.exercise_title(path, display)
+    try:
+        found = sections.get_section(cells.read(path), section)
+    except sections.SectionNotFound:
+        return links.exercise_title(path, display, missing_section=section)
+    except OSError, cells.NotebookError:
+        # e.g. while it is being saved; its tests tell what is wrong
+        return links.exercise_title(path, display)
+    return links.exercise_title(
+        path, display, section_title=found.title, cell_id=found.anchor.id
+    )
 
 
 def _cant_start(name: str, problems: list[Problem]) -> str:
@@ -403,9 +429,13 @@ class PyIC:
             if hint_revealed:
                 # the hints are shown above the test results
                 self.cli.scroll_offset = 0
+            task_sections = course.sections
+            titles = [
+                _exercise_title(p, task_sections.get(paths.absolute(p)))
+                for p in course.exercise_files
+            ]
             self.cli.update_main_content(
-                course.status,
-                Text(", ".join(p.as_posix() for p in course.exercise_files), style="dim"),
+                course.status, Text(", ", style="dim").join(titles)
             )
 
         if new_progress or entered:

@@ -6,6 +6,7 @@ sections when creating and editing tasks.
 """
 
 import copy
+import io
 import json as std_json
 import os
 import re
@@ -18,7 +19,10 @@ from typing import Any
 
 import pytest
 from notebook_helpers import code, make_notebook, markdown, write_notebook
+from rich.console import Console
 
+from pyics.app.cli import CLI
+from pyics.app.pyics import PyIC, _exercise_title
 from pyics.data import Course, Task
 from pyics.notebook import loader
 from pyics.notebook.sections import (
@@ -476,3 +480,119 @@ def test_tasks_sharing_a_notebook_progress_independently(
     _wait_for(lambda: not reopened.loading and not reopened.check_status)
     assert reopened.progress == Fraction(1, 2)
     assert reopened.instructions == "Exercise 2"
+
+
+# --- the TUI's title ---
+
+
+def test_the_title_shows_the_section_of_the_task(lecture: Path) -> None:
+    def title(section: str | None) -> str:
+        return _exercise_title(lecture, section).plain
+
+    path = lecture.as_posix()
+    assert title("ex2") == f"{path} › Exercise 2: Sums"
+    assert title(None) == path
+
+    # moved to the top, and renamed: looked up in the saved notebook
+    nb = _lecture()
+    nb["cells"][4]["source"] = ["<!-- pyics: ex2 -->\n", "## Exercise 2: Totals"]
+    nb["cells"] = nb["cells"][4:7] + nb["cells"][:4] + nb["cells"][7:]
+    write_notebook(lecture, nb)
+    assert title("ex2") == f"{path} › Exercise 2: Totals"
+
+    del nb["cells"][0]  # its anchor
+    write_notebook(lecture, nb)
+    missing = _exercise_title(lecture, "ex2")
+    assert missing.plain == f"{path} › section 'ex2' not found"
+    assert [
+        missing.plain[s.start : s.end] for s in missing.spans if s.style == "red"
+    ] == ["section 'ex2' not found"]
+
+    lecture.write_text("not a notebook")  # e.g. while it is saved
+    assert title("ex2") == path
+
+
+def test_the_title_of_python_files_is_their_path(chdir: Path) -> None:
+    title = _exercise_title(chdir / "bfs.py", None)
+    assert title.plain == (chdir / "bfs.py").as_posix()
+    assert title.spans == []
+
+
+def _write_server(runtime_dir: Path, root_dir: Path) -> None:
+    """Write a ``jpserver-*.json`` file as jupyter_server does, for a JupyterLab of
+    ``root_dir`` running as this process."""
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    info = {
+        "base_url": "/",
+        "pid": os.getpid(),
+        "root_dir": str(root_dir),
+        "token": "secret-token",
+        "url": "http://localhost:8888/",
+    }
+    (runtime_dir / "jpserver-1.json").write_text(std_json.dumps(info))
+
+
+@pytest.fixture
+def terminal_cli(monkeypatch: pytest.MonkeyPatch) -> CLI:
+    """A CLI whose console writes to a terminal that isn't VS Code's or Jupyter's, as
+    rich only writes links to terminals."""
+    for var in ("TERM_PROGRAM", "JUPYTER_SERVER_ROOT", "JUPYTER_SERVER_URL"):
+        monkeypatch.delenv(var, raising=False)
+    cli = CLI()
+    cli.console = Console(
+        force_terminal=True,
+        color_system="truecolor",
+        legacy_windows=False,
+        width=200,
+        height=40,
+    )
+    return cli
+
+
+def test_the_tui_title_links_the_section_into_jupyterlab(
+    lecture: Path,
+    chdir: Path,
+    terminal_cli: CLI,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    no_new_threads: None,
+) -> None:
+    _write_server(chdir / "runtime", chdir)
+    monkeypatch.setenv("JUPYTER_RUNTIME_DIR", str(chdir / "runtime"))
+    task = Task.create_task_json(
+        chdir / "t",
+        "T",
+        "",
+        lecture,
+        tests=StructureTest("no loops", lecture, NO_LOOPS),
+        sections={lecture: "ex1"},
+    )
+    course = Course.load_course_manifest(
+        Course.create_course_manifest(chdir / "c", [task])
+    )
+    app = PyIC(terminal_cli)
+
+    def update_until(text: str) -> None:
+        _wait_for(lambda: (app._update_course(course), text in app.cli.main_title)[1])
+
+    update_until("Exercise 1: Squares")
+    assert str(app.cli.main_title) == f"{lecture.as_posix()} › Exercise 1: Squares"
+    capsys.readouterr()
+    app.cli.draw_interface()
+    links = OSC8.findall(capsys.readouterr().out)
+    assert "http://localhost:8888/lab/tree/lecture.ipynb#cell-id=ex1-anchor" in links
+    assert lecture.as_uri() in links
+
+    # the title follows the saved notebook
+    nb = _lecture()
+    nb["cells"][1]["source"] = ["# Exercise 1: Square numbers"]
+    nb["cells"] = nb["cells"][4:] + nb["cells"][:4]
+    _save(lecture, nb)
+    update_until("Exercise 1: Square numbers")
+
+    del nb["cells"][5]["metadata"]["tags"]  # ex1's anchor, now the sixth cell
+    _save(lecture, nb)
+    update_until("section 'ex1' not found")
+    console = Console(width=200, file=io.StringIO(), record=True)
+    console.print(course.status)
+    assert "no loops failed: Section 'ex1' not found" in console.export_text()
