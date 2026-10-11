@@ -8,8 +8,10 @@ from types import ModuleType
 from typing import Any, ClassVar, Protocol, Self
 
 from _pytest.assertion.util import assertrepr_compare, dummy_highlighter
+from rich.markup import escape
 
 import pyics.util.json_handling as json
+from pyics.notebook import cells, loader
 from pyics.tests.capture import capture_stdout, provide_input
 from pyics.tests.trace import Trace
 from pyics.util.paths import StrPath
@@ -52,7 +54,13 @@ class Test(ABC):
         With ``trace``, the file's code is watched by it (see ``Trace.watch``), so that
         the calls into it that are run by ``trace`` are traced. A script is traced as a
         whole, while importing a module isn't.
+
+        A notebook's code cells are run instead (see ``loader.run_notebook``), where an
+        error in a cell doesn't stop the run.
         """
+        if cells.is_notebook(self.file_path):
+            return loader.load_module(self.file_path, as_main=as_main, trace=trace)
+
         spec: ModuleSpec | None = iutil.spec_from_file_location(
             name="current_solution", location=self.file_path
         )
@@ -107,6 +115,11 @@ class PrintTest(Test):
     that isn't visible in a console is ignored. Only the output of the thread running the
     test is captured, so that other threads (e.g. the CLI's) can keep writing to the
     console in the meantime.
+
+    A notebook's code cells are run instead, and their output is compared, which
+    includes what Jupyter shows as text: the ``repr`` of objects passed to ``display``,
+    and of each cell's final expression (unless it is ``None``, or the cell ends with
+    ``;``).
     """
 
     expected: str  # printout is necessarily str
@@ -137,10 +150,15 @@ class PrintTest(Test):
     def run(self, trace: Trace | None = None) -> None:
         trace = trace if self.traceable else None
         with capture_stdout() as buffer, provide_input(self.inputs):
-            try:
-                self.load_solution(as_main=True, trace=trace)
-            except SystemExit:
-                pass  # the program ended
+            if cells.is_notebook(self.file_path):
+                # each cell's output is captured on its own
+                run = loader.run_notebook(self.file_path, as_main=True, trace=trace)
+                buffer.write(run.output())
+            else:
+                try:
+                    self.load_solution(as_main=True, trace=trace)
+                except SystemExit:
+                    pass  # the program ended
         res, expected = _visible(buffer.getvalue()), _visible(self.expected)
 
         if res != expected:
@@ -256,6 +274,10 @@ class StructureTest(Test):
 
     ``rules`` is a rule dict or a list of rule dicts (see ``check_structure``), e.g.
     ``{"concept": "recursion", "scope": "fib"}``. The file is parsed, but not executed.
+
+    Of a notebook, the code cells are checked (see ``loader.python_source``), and lines
+    are named by their cell, e.g. "cell 3, line 2". Cells that can't be parsed are left
+    out, and named if the test fails.
     """
 
     rules: list[check_structure.Rule]
@@ -273,11 +295,30 @@ class StructureTest(Test):
 
     def run(self, trace: Trace | None = None) -> None:
         path = Path(self.file_path)
-        diff = check_structure.check_structure(
-            self.rules, path.read_text(encoding="utf-8"), filename=path.name
-        )
+        if cells.is_notebook(path):
+            diff = self._check_notebook(loader.python_source(path), path.name)
+        else:
+            diff = check_structure.check_structure(
+                self.rules, path.read_text(encoding="utf-8"), filename=path.name
+            )
         if diff:
             raise MarkupAssertionError("\n".join(diff))
+
+    def _check_notebook(
+        self, source: loader.NotebookSource, filename: str
+    ) -> list[str]:
+        """Messages for the rules that don't hold for the code cells ``source``, and the
+        cells left out since they can't be parsed, which may be why."""
+        diff = check_structure.check_structure(
+            self.rules, source.source, filename=filename, locate=source.locate
+        )
+        if diff:
+            diff += [
+                f"Could not parse cell {cell.number}: {escape(err.msg)} "
+                f"(line {err.lineno})."
+                for cell, err in source.unparsable
+            ]
+        return diff
 
 
 class SizeTest(Test):
