@@ -15,6 +15,7 @@ from rich.text import Text
 
 from pyics.data.task import Task
 from pyics.distribution.dependencies import ModulePolicy, manifest_requirements
+from pyics.notebook import cells, kernelspec
 from pyics.util import json_handling as json
 from pyics.util import paths
 from pyics.util.discovery import COURSE_SUFFIX
@@ -27,6 +28,11 @@ from pyics.util.logging import get_logger
 # ``description``, ``tags``, the packages it needs besides pyics (``requires``, PEP 508
 # requirements) and the pyics version it needs (``requires_pyics``).
 METADATA_KEYS = ("slug", "version", "description", "tags", "requires", "requires_pyics")
+
+KERNEL_HINT = (
+    "For live results when you run cells, run `pyics install_kernel` and choose the "
+    '"Python (pyics)" kernel for the notebook.'
+)
 
 
 def _hints_view(hints: list[str], total: int) -> RenderableType:
@@ -91,6 +97,9 @@ class Course:
         # how many hints have been revealed, by task name, so they stay revealed when a
         # task is left and visited again
         self.__hints_shown: dict[str, int] = {}
+        # whether the "Python (pyics)" kernel is installed, once a task with notebooks
+        # needs to know
+        self.__kernel_installed: bool | None = None
 
         # the position of the task whose progress is being checked
         self.__checking: int | None = 0 if check_progress else None
@@ -232,6 +241,25 @@ class Course:
         return True
 
     @property
+    def kernel_hint(self) -> str | None:
+        """
+        How to see live results (``KERNEL_HINT``), if the current task has notebook
+        exercise files but the "Python (pyics)" kernel, which runs their tests when
+        cells run, isn't installed (see ``kernelspec.is_installed``, checked once per
+        course). None otherwise.
+        """
+        task = self.__current_task
+        if task is None or not any(map(cells.is_notebook, task.exercise_files)):
+            return None
+        if self.__kernel_installed is None:
+            try:
+                self.__kernel_installed = kernelspec.is_installed()
+            except Exception:  # noqa: BLE001
+                get_logger(__name__).warning("Can't look for kernels", exc_info=True)
+                self.__kernel_installed = True  # rather than suggest it for nothing
+        return None if self.__kernel_installed else KERNEL_HINT
+
+    @property
     def info(self) -> RenderableType:
         """
         The current task's info, i.e. what is supposed to be displayed in the pyics header.
@@ -359,7 +387,9 @@ class Course:
 
         1. Calls check_file_changes on the current task
         2. Calls run_tests on the current task if files have changed.
-        3. checks if the course progress needs to be updated
+        3. Calls check_live_results on the current task, to show the live results of
+           its notebooks' kernels (which never count as progress)
+        4. checks if the course progress needs to be updated
 
         Returns
         -------
@@ -378,6 +408,8 @@ class Course:
 
         if files_changed:
             self.__current_task.run_tests()
+
+        self.__current_task.check_live_results()
 
         current_task_number = self.__current_task_number()
         solved = int(self.__current_task.solved)

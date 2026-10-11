@@ -415,8 +415,10 @@ class PyIC:
             course.clear_task_changed()
 
         if task_changed or entered:
-            info = course.name if course.loading else course.instructions
-            self.cli.update_info(escape(info))
+            info = escape(course.name if course.loading else course.instructions)
+            if not course.loading and (hint := course.kernel_hint) is not None:
+                info += f"\n[dim]{escape(hint)}[/dim]"
+            self.cli.update_info(info)
 
         if course.loading:
             if entered or course.check_status != self.__shown_check_status:
