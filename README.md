@@ -216,7 +216,7 @@ With the "Python (pyics)" kernel, running a cell reruns the tests on what the ke
 - **What runs live:** ``SimpleTest``s and ``SpecTest``s test the functions and classes as the kernel defines them right now, and ``StructureTest``s check the cells as they were last run. ``PrintTest``s only run when the notebook is saved, and keep their result from the last save. What the tested code prints doesn't show up under your cell. Interrupt the kernel (■) to stop a test stuck in an endless loop: it is reported as interrupted.
 - **What PyICs shows:** each test's newest result, from the kernel or from the saved notebook. Live failures are labelled ``(live)``, and live results are underlined in the summary. The line below the summary says where the results come from:
   - _Live results from your notebook kernel (cell 5, 12:03:41). Save the notebook to count your progress._: the cell you ran last, and when.
-  - _No notebook kernel connected: results are from your saved notebook._: no kernel runs the extension, or the kernel stopped responding for 10 s, e.g. after a crash.
+  - _No notebook kernel connected: results are from your saved notebook._: no kernel runs the extension, or the kernel stopped responding for 10 s, e.g. after a crash (the line then says so).
   - _Your notebook kernel restarted: run your cells to see live results._
   - _Ignoring the notebook kernel …_: the kernel runs another version of pyics. Choose the "Python (pyics)" kernel and restart it.
   - _… passes in your kernel, but not in the saved notebook: was a cell deleted or not saved?_: the kernel still holds something the saved notebook doesn't, e.g. a function from a deleted cell. _Restart Kernel and Run All Cells_ shows what the saved notebook does.

@@ -574,6 +574,21 @@ def test_a_kernel_running_other_tasks_is_said_so(
     assert task.shown_results()[1] == set()
 
 
+def test_tests_stay_pending_until_the_saved_notebook_is_tested(
+    task_file: Path, kernel: Callable[..., KernelChannel], clock: FakeClock
+) -> None:
+    task = Task(task_file, setup=False)
+    k = kernel()
+    clock.advance(1)
+    k.write_results(1, CELL, {task_file: live_run()})
+    assert task.check_live_results()
+    assert _status(task) == "tests pending...\n"
+    assert not task.new_test_results
+
+    task.check_solved()
+    assert "Live results from your notebook kernel" in _status(task)
+
+
 def test_python_files_have_no_status_line(chdir: Path) -> None:
     add = chdir / "add.py"
     add.write_text("def add(a, b):\n    return 0\n")

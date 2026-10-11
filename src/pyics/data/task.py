@@ -102,14 +102,13 @@ def _shown_live(live: list[TestResult], saved: list[TestResult] | None) -> bool:
     """
     Whether the ``live`` result of a test (its phases) is shown rather than its
     ``saved`` one, given that it is newer: unless it was skipped (e.g. a ``PrintTest``,
-    which only runs on the saved files), or it is another test's (the kernel and the
-    TUI loaded different versions of the task file).
+    which only runs on the saved files), or it is another test's, or a test the saved
+    files' run doesn't know (the kernel and the TUI loaded different versions of the
+    task file).
     """
-    if saved is None:
-        return True
-    return live[0].nodeid == saved[0].nodeid and all(
-        r.outcome != "skipped" for r in live
-    )
+    if saved is None or live[0].nodeid != saved[0].nodeid:
+        return False
+    return all(r.outcome != "skipped" for r in live)
 
 
 def _describe_run(run: LiveResults) -> str:
@@ -483,9 +482,6 @@ class Task:
                     results.append(result)
                 elif result is saved[result.index][0]:
                     results += live[result.index]
-            # tests without a saved result, e.g. while the files are first tested
-            for i in sorted(shown - saved.keys()):
-                results += live[i]
             return results, shown
 
     def __live_status(
@@ -663,8 +659,10 @@ class Task:
 
         with self.__status_lock:
             self.live_state, self.live_results = self.__connected()
-            self.update_status()
-            self.__new_test_results = True
+            # until the files have been tested, the status says the tests are pending
+            if self.__tested:
+                self.update_status()
+                self.__new_test_results = True
         return True
 
     def __connected(self) -> tuple[ChannelState | None, list[TestResult]]:
