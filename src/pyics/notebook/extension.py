@@ -590,8 +590,19 @@ class _LoadedTask:
     # the course's requires its objects are decoded with (see ``ModulePolicy``), None
     # for any module
     requires: list[str] | None
-    # the task file's modification time when it was loaded
-    mtime_ns: int
+    # the task file's modification time and size when it was loaded (see ``_version``)
+    version: tuple[int, int]
+    # the version of the task file that couldn't be loaded last, which isn't tried
+    # again (nor reported again) until the file changes
+    broken: tuple[int, int] | None = None
+
+
+def _version(path: Path) -> tuple[int, int]:
+    """The modification time and size of the file at ``path``, which tell whether it
+    changed: its size changes when it is read while it is being written, even where
+    modification times are coarse."""
+    st = os.stat(path)
+    return st.st_mtime_ns, st.st_size
 
 
 def _load_task(path: Path, requires: list[str] | None) -> _LoadedTask:
@@ -603,10 +614,10 @@ def _load_task(path: Path, requires: list[str] | None) -> _LoadedTask:
     Exception
         If it can't be loaded, e.g. ``OSError``, or ``ModuleNotAllowedError``.
     """
-    mtime_ns = os.stat(path).st_mtime_ns
+    version = _version(path)
     policy = None if requires is None else ModulePolicy(requires)
     task = Task(path, setup=False, module_policy=policy)
-    return _LoadedTask(task, requires, mtime_ns)
+    return _LoadedTask(task, requires, version)
 
 
 class _KernelLog(logging.Handler):
@@ -748,18 +759,19 @@ class LiveRuns:
         removed is dropped."""
         for path, loaded in list(self.tasks.items()):
             try:
-                mtime_ns = os.stat(path).st_mtime_ns
+                version = _version(path)
             except FileNotFoundError:
                 _logger.warning(f"The task file {path} was removed")
                 del self.tasks[path]
                 continue
             except OSError:
                 continue
-            if mtime_ns == loaded.mtime_ns:
+            if version in (loaded.version, loaded.broken):
                 continue
             try:
                 self.tasks[path] = _load_task(path, loaded.requires)
             except Exception:  # noqa: BLE001
+                loaded.broken = version
                 _logger.warning(f"Can't load the changed task {path}", exc_info=True)
 
     def _register(self) -> None:

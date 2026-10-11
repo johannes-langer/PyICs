@@ -25,6 +25,7 @@ from traitlets.config import Config
 import pyics
 from pyics.data import Course, Task
 from pyics.notebook import extension
+from pyics.notebook.cells import Cell
 from pyics.notebook.channel import (
     CONTROL_FILE,
     CellRef,
@@ -34,7 +35,6 @@ from pyics.notebook.channel import (
     write_json_atomic,
 )
 from pyics.notebook.extension import CellLog, LiveRuns, find_tasks, notebook_path
-from pyics.notebook.cells import Cell
 from pyics.tests.results import TestResult
 from pyics.tests.tests import PrintTest, SimpleTest, StructureTest, Test
 from pyics.tests.trace import ansi_text
@@ -400,7 +400,7 @@ def test_vs_codes_notebook_variable_is_looked_for_at_each_cell(
 def test_without_a_task_a_single_warning_says_how_to_name_one(
     shell: InteractiveShell, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    notebook, task = write_task(tmp_path, ADD_CELLS, adds, course=False)
+    notebook, _ = write_task(tmp_path, ADD_CELLS, adds, course=False)
     live = load(shell, notebook, monkeypatch)
     captured = run(shell, ADD, "cell-2")
     assert captured.stdout == "" and captured.outputs == []
@@ -468,6 +468,27 @@ def test_changed_task_files_are_loaded_again(
     os.utime(task, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
     run(shell, SUBTRACT, "cell-2")
     assert outcomes(live, task) == {"subtracts": "passed"}
+
+
+def test_a_broken_task_file_keeps_the_tests_and_is_reported_once(
+    shell: InteractiveShell,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    extension_log: list[logging.LogRecord],
+) -> None:
+    notebook, task = write_task(tmp_path, ADD_CELLS, adds)
+    live = load(shell, notebook, monkeypatch)
+    text = task.read_text(encoding="utf-8")
+    task.write_text("{ half written", encoding="utf-8")
+    assert_silent(run(shell, ADD, "cell-2"))
+    assert_silent(run(shell, SUBTRACT, "cell-2"))
+    assert outcomes(live, task) == {"adds": "failed"}
+    warnings = [r.getMessage() for r in extension_log if r.levelno >= logging.WARNING]
+    assert warnings == [f"Can't load the changed task {task}"]
+
+    task.write_text(text, encoding="utf-8")
+    run(shell, ADD, "cell-2")
+    assert outcomes(live, task) == {"adds": "passed"}
 
 
 # --- pausing and interrupting ---
