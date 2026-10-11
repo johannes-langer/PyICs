@@ -605,9 +605,20 @@ def test_the_tui_title_links_the_section_into_jupyterlab(
     del nb["cells"][5]["metadata"]["tags"]  # ex1's anchor, now the sixth cell
     _save(lecture, nb)
     update_until("section 'ex1' not found")
-    console = Console(width=200, file=io.StringIO(), record=True)
-    console.print(course.status)
-    assert "no loops failed: Section 'ex1' not found" in console.export_text()
+
+    def status() -> str:
+        console = Console(width=200, file=io.StringIO(), record=True)
+        console.print(course.status)
+        return console.export_text()
+
+    # the title is looked up when it is drawn, but the results drawn with it may come
+    # from a run that started before the notebook was saved
+    _wait_for(
+        lambda: (
+            app._update_course(course),
+            "no loops failed: Section 'ex1' not found" in status(),
+        )[1]
+    )
 
 
 # --- choosing sections when creating and editing tasks ---
