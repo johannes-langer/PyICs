@@ -9,6 +9,7 @@ import copy
 import io
 import json as std_json
 import os
+import queue
 import re
 import threading
 import time
@@ -16,12 +17,14 @@ from collections.abc import Callable, Iterator
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from notebook_helpers import code, make_notebook, markdown, write_notebook
 from rich.console import Console
 
 from pyics.app.cli import CLI
+from pyics.app.prompts import PromptSession
 from pyics.app.pyics import PyIC, _exercise_title
 from pyics.data import Course, Task
 from pyics.notebook import loader
@@ -31,6 +34,12 @@ from pyics.notebook.sections import (
     find_sections,
     get_section,
     is_name,
+)
+from pyics.scripts.create_task import (
+    _TEST_TYPES,
+    _prompt_sections,
+    _prompt_test,
+    _task_flow,
 )
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin, RichFailureRepr
 from pyics.tests.tests import (
@@ -596,3 +605,183 @@ def test_the_tui_title_links_the_section_into_jupyterlab(
     console = Console(width=200, file=io.StringIO(), record=True)
     console.print(course.status)
     assert "no loops failed: Section 'ex1' not found" in console.export_text()
+
+
+# --- choosing sections when creating and editing tasks ---
+
+
+# confirms every prompt of the edit flow for a task of a notebook with sections, without
+# a solution file, and with one test
+KEEP_ALL = [
+    ENTER,  # name
+    CTRL_D,  # instructions
+    ENTER,  # add a hint: no
+    ENTER, ENTER,  # keep the notebook, add another exercise file: no
+    ENTER,  # the task's section: keep
+    ENTER,  # add a solution file: no
+    ENTER,  # keep the test
+    ENTER,  # done adding tests
+]  # fmt: skip
+
+
+def _session(keys: list[str]) -> PromptSession:
+    q: queue.Queue[str] = queue.Queue()
+    # a trailing ctrl-c cancels instead of hanging if the flow asks for more than scripted
+    for key in [*keys, CTRL_C]:
+        q.put(key)
+    return PromptSession(MagicMock(), q)
+
+
+def _run_flow[T](keys: list[str], flow: Callable[[PromptSession], T]) -> T:
+    s = _session(keys)
+    result = s.run(flow)
+    assert s.q.get_nowait() == CTRL_C, "flow finished before all keys were used"
+    return result
+
+
+def _shown(s: PromptSession, title: str) -> str:
+    """The text of the last prompt with the label ``title``, as the CLI shows it."""
+    assert isinstance(s.cli, MagicMock)
+    calls = s.cli.update_main_content.call_args_list
+    renderable = next(c.args[0] for c in reversed(calls) if c.kwargs["title"] == title)
+    console = Console(width=100, record=True, file=io.StringIO())
+    console.print(renderable)
+    return console.export_text()
+
+
+def _type(text: str) -> list[str]:
+    return [*text, ENTER]
+
+
+def _structure_test(section_keys: list[str]) -> list[str]:
+    """Add a StructureTest of the notebook (the only exercise file) without a test
+    information file, choosing its section with ``section_keys``."""
+    return [
+        *[DOWN] * _TEST_TYPES.index(StructureTest), ENTER,
+        DOWN, ENTER,  # reference a file with test information: no
+        *_type("no loops"),  # name
+        ENTER,  # file_path
+        *_type(repr(NO_LOOPS)),  # rules
+        *section_keys,
+    ]  # fmt: skip
+
+
+def test_creating_a_task_of_a_section(lecture: Path, chdir: Path) -> None:
+    s = _session(
+        [
+            *_type("Sums"),  # name
+            "I", CTRL_D,  # instructions
+            ENTER,  # add a hint: no
+            *_type(str(lecture)), DOWN, ENTER,  # one exercise file
+            DOWN, DOWN, ENTER,  # the task's section: ex2
+            DOWN, ENTER,  # add a solution file: no
+            *_structure_test([ENTER]),  # the task's section, preselected
+            *_structure_test([DOWN, ENTER]),  # the whole notebook
+            *_structure_test([DOWN, DOWN, ENTER]),  # ex1, after the task's ex2
+            *[DOWN] * len(_TEST_TYPES), ENTER,  # done
+        ]
+    )  # fmt: skip
+    fields = s.run(_task_flow)
+    assert s.q.get_nowait() == CTRL_C
+    assert fields["sections"] == {lecture: "ex2"}
+    assert [t.section for t in fields["tests"]] == [INHERIT, None, "ex1"]
+    assert "section" not in vars(fields["tests"][0])
+
+    shown = _shown(s, f"Section of the task in {lecture}")
+    for option in [
+        "No section (whole notebook)",
+        "ex1 (Exercise 1: Squares)",
+        "ex2 (Exercise 2: Sums)",
+        "ex3",
+    ]:
+        assert option in shown
+    shown = _shown(s, "section")
+    assert "The task's section (ex2)" in shown
+    assert "ex2 (Exercise 2: Sums)" not in shown  # offered as the task's
+
+    task_file = Task.create_task_json(chdir / "t", **fields)
+    assert Task(task_file, setup=False).sections == {lecture: "ex2"}
+
+
+def test_notebooks_without_sections_arent_asked_for_one(chdir: Path) -> None:
+    plain = write_notebook(chdir / "plain.ipynb", ["x = 1"])
+    assert _run_flow([], lambda s: _prompt_sections(s, [plain], {}, {})) == {}
+    test = _run_flow(
+        [DOWN, ENTER, *_type("t"), ENTER, *_type(repr(NO_LOOPS))],
+        lambda s: _prompt_test(s, StructureTest, [plain]),
+    )
+    assert "section" not in vars(test)
+
+
+@pytest.fixture
+def section_task(lecture: Path, chdir: Path) -> Path:
+    """A task about the section ex2 of the lecture, with a test that inherits it."""
+    return Task.create_task_json(
+        chdir / "t",
+        "T",
+        "",
+        lecture,
+        tests=StructureTest("no loops", lecture, NO_LOOPS),
+        sections={lecture: "ex2"},
+    )
+
+
+def _edit(keys: list[str], task_file: Path) -> tuple[dict[str, Any], PromptSession]:
+    current = Task.read_task_json(task_file)
+    s = _session(keys)
+    fields = s.run(lambda s: _task_flow(s, current=current))
+    assert s.q.get_nowait() == CTRL_C, "flow finished before all keys were used"
+    return fields, s
+
+
+def test_editing_keeps_the_sections(section_task: Path, lecture: Path) -> None:
+    original = section_task.read_text()
+    fields, _ = _edit(KEEP_ALL, section_task)
+    assert fields["sections"] == {lecture: "ex2"}
+    Task.create_task_json(section_task, **fields)
+    assert section_task.read_text() == original
+
+
+def test_editing_the_section_of_a_task_and_a_test(section_task: Path) -> None:
+    fields, s = _edit(
+        [
+            *KEEP_ALL[:5],
+            UP, UP, ENTER,  # the task's section: none
+            ENTER,  # add a solution file: no
+            DOWN, ENTER,  # edit the test
+            ENTER, ENTER, ENTER, ENTER,  # info file: no; name, file_path, rules: keep
+            DOWN, ENTER,  # section: the whole notebook, from the task's
+            ENTER,  # done adding tests
+        ],
+        section_task,
+    )  # fmt: skip
+    assert fields["sections"] == {}
+    (test,) = fields["tests"]
+    assert test.section is None
+    assert "The task's section (none: whole notebook)" in _shown(s, "section")
+
+
+def test_a_missing_section_is_kept_unless_changed(
+    section_task: Path, lecture: Path
+) -> None:
+    nb = _lecture()
+    del nb["cells"][4]  # ex2's anchor
+    write_notebook(lecture, nb)
+    fields, s = _edit(
+        [*KEEP_ALL[:3], DOWN, ENTER, *KEEP_ALL[4:]],  # update the notebook
+        section_task,
+    )
+    assert fields["sections"] == {lecture: "ex2"}
+    shown = _shown(s, f"Section of the task in {lecture}")
+    assert "ex2 (not found in the notebook)" in shown
+
+
+def test_editing_prefills_the_section_of_a_test(lecture: Path) -> None:
+    current = StructureTest("t", lecture, NO_LOOPS, section="ex3")
+    test = _run_flow(
+        [ENTER, ENTER, ENTER, ENTER, ENTER],  # keep everything
+        lambda s: _prompt_test(
+            s, StructureTest, [lecture], current, task_sections={lecture: "ex2"}
+        ),
+    )
+    assert test.section == "ex3"

@@ -206,6 +206,7 @@ def test_new_task_is_not_written(
                 "tests": None,
                 "file_contents": {},
                 "help": [],
+                "sections": {},
             },
         )
     ]
