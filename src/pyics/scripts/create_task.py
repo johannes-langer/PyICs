@@ -3,6 +3,7 @@ import copy
 import difflib
 import inspect
 import reprlib
+import sys
 from collections.abc import Collection, Mapping
 from os import PathLike
 from pathlib import Path, PurePath
@@ -26,7 +27,7 @@ from pyics.app.prompts import (
     TextInput,
 )
 from pyics.data.task import Task
-from pyics.notebook import cells, sections
+from pyics.notebook import cells, loader, sections
 from pyics.notebook.sections import Section
 from pyics.tests import Test, check_specs, check_structure
 from pyics.tests.tests import (
@@ -75,6 +76,8 @@ _CURRENT = "current"
 # notebook's sections
 _NO_SECTION = "No section (whole notebook)"
 _WHOLE_NOTEBOOK = "Whole notebook"
+# the module a notebook with test information runs as (see ``_load_namespace``)
+_INFO_MODULE = "pyics_test_information"
 
 
 def _confirm(s: PromptSession, label: str, *, default: bool = True) -> bool:
@@ -387,18 +390,46 @@ def _edit_files(
     return _prompt_files(s, kind, kept), contents, moved
 
 
-def _load_namespace(raw: str) -> dict[str, Any]:
-    """Execute the Python file at ``raw`` and return the variables it defines (excluding
-    dunders and modules)."""
+def _load_namespace(raw: str) -> tuple[dict[str, Any], str]:
+    """
+    Execute the Python file at ``raw``, or run the code cells of the notebook at it (see
+    ``loader.run_notebook``), and return the variables it defines (excluding dunders and
+    modules, and a notebook's stand-ins for ``get_ipython`` and ``display``).
+
+    Returns
+    -------
+    tuple[dict[str, Any], str]
+        The variables, and the errors of the notebook's cells as a problem to show (see
+        ``_prompt_param``), or an empty string. An error in a cell doesn't stop the
+        notebook's run, but the variables it would have defined are missing.
+    """
     path = _check_file(raw)
-    namespace: dict[str, Any] = {}
-    source = path.read_text(encoding="utf-8")
-    exec(compile(source, str(path), "exec"), namespace)  # noqa: S102
+    problem = ""
+    if cells.is_notebook(path):
+        previous = sys.modules.get(_INFO_MODULE)
+        try:
+            run = loader.run_notebook(path, module_name=_INFO_MODULE)
+        finally:
+            if previous is None:
+                sys.modules.pop(_INFO_MODULE, None)
+            else:
+                sys.modules[_INFO_MODULE] = previous
+        namespace = vars(run.module)
+        if run.errors:
+            more = f" (and {len(run.errors) - 1} more)" if len(run.errors) > 1 else ""
+            problem = f"In the test information file, {run.errors[0].describe()}{more}"
+    else:
+        namespace = {}
+        source = path.read_text(encoding="utf-8")
+        exec(compile(source, str(path), "exec"), namespace)  # noqa: S102
     return {
         k: v
         for k, v in namespace.items()
-        if not k.startswith("__") and not isinstance(v, ModuleType)
-    }
+        if not k.startswith("__")
+        and not isinstance(v, ModuleType)
+        # the loader's stand-ins, rather than what the notebook imports or defines
+        and getattr(v, "__module__", None) != loader.__name__
+    }, problem
 
 
 def _check(test_cls: type[Test], param: inspect.Parameter, value: Any) -> Any:
@@ -505,9 +536,11 @@ def _prompt_test(
     constructor. When editing the test ``current``, each one is prefilled with its
     current value.
 
-    The user may reference a Python file first: its variables whose names match a
-    parameter are used for it directly, and all of them are in scope for the expressions
-    entered for the other parameters. ``file_path`` is always one of ``ex_files``.
+    The user may reference a Python file or a notebook first: its variables whose names
+    match a parameter are used for it directly, and all of them are in scope for the
+    expressions entered for the other parameters. If cells of the notebook raised an
+    error, the prompts for the other parameters say so. ``file_path`` is always one of
+    ``ex_files``.
 
     A test of a notebook can be about a ``section`` of it (see ``_prompt_test_section``):
     by default the task's, i.e. its section in ``task_sections`` (by path). Sections are
@@ -517,8 +550,11 @@ def _prompt_test(
     task_sections = {paths.absolute(p): n for p, n in (task_sections or {}).items()}
     kept = {paths.absolute(p): text for p, text in (contents or {}).items()}
     symbols: dict[str, Any] = {}
+    info_problem = ""
     if _confirm(s, "Reference a file with test information?", default=current is None):
-        symbols = s.ask(PathInput("Test information file"), _load_namespace)
+        symbols, info_problem = s.ask(
+            PathInput("Test information file"), _load_namespace
+        )
 
     kwargs: dict[str, Any] = {}
     for param in inspect.signature(test_cls).parameters.values():
@@ -550,7 +586,7 @@ def _prompt_test(
                     kwargs[param.name] = section
             continue
 
-        problem = ""
+        problem = info_problem
         if param.name in symbols:
             try:
                 kwargs[param.name] = _check(test_cls, param, symbols[param.name])
