@@ -28,7 +28,13 @@ from pyics.app.prompts import (
 from pyics.data.task import Task
 from pyics.notebook import cells
 from pyics.tests import Test, check_specs, check_structure
-from pyics.tests.tests import PrintTest, SimpleTest, SpecTest, StructureTest
+from pyics.tests.tests import (
+    INHERIT,
+    PrintTest,
+    SimpleTest,
+    SpecTest,
+    StructureTest,
+)
 from pyics.util import paths
 from pyics.util.terminal import fullscreen
 
@@ -367,6 +373,9 @@ def _prompt_test(
             kwargs[param.name] = Path(s.ask(prompt)).absolute()
             continue
 
+        if param.name == "section":
+            continue  # a test that isn't given one inherits its task's
+
         problem = ""
         if param.name in symbols:
             try:
@@ -385,7 +394,7 @@ def _describe_test(test: Test, problem: str = "") -> RenderableType:
     lines.append(Text(type(test).__name__, style="dim"))
     for param in inspect.signature(type(test)).parameters.values():
         value = getattr(test, param.name, param.empty)
-        if value is param.empty:
+        if value is param.empty or value is INHERIT:
             continue
         text = str(value) if isinstance(value, PurePath) else reprlib.repr(value)
         lines.append(Text(f"  {param.name} = {text}", style="dim"))

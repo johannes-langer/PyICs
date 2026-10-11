@@ -16,6 +16,7 @@ from rich.text import Text
 import pyics.util.json_handling as json
 from pyics.distribution.dependencies import ModulePolicy, check_task_data
 from pyics.notebook import cells
+from pyics.notebook import sections as notebook_sections
 from pyics.util import paths, terminal
 from pyics.util.paths import StrPath
 from pyics.util.logging import get_logger
@@ -87,6 +88,20 @@ def _hint_list(hints: str | Sequence[str] | None) -> list[str]:
     return list(hints)
 
 
+def _read_sections(raw_json: Mapping[str, Any], base: Path) -> dict[Path, str]:
+    """The ``sections`` of a task file read from the directory ``base``, by notebook
+    path resolved relative to ``base`` (see ``create_task_json``). Entries that aren't a
+    path and the name of a section are left out."""
+    stored = raw_json.get("sections")
+    if not isinstance(stored, Mapping):
+        return {}
+    return {
+        paths.resolve(path, base): name
+        for path, name in stored.items()
+        if isinstance(path, str) and notebook_sections.is_name(name)
+    }
+
+
 class Task:
     """Unified Task Representation"""
 
@@ -146,6 +161,13 @@ class Task:
         self.solution_files: list[Path] = [
             paths.resolve(fp, base) for fp in raw_json.get("sol_files", [])
         ]
+        # the section of each exercise notebook the task is about, by the notebook's
+        # absolute path (see ``pyics.notebook.sections``). Its tests inherit it, unless
+        # they have a section of their own (see ``Test.resolved_section``).
+        self.sections: dict[Path, str] = {
+            paths.absolute(path): name
+            for path, name in _read_sections(raw_json, base).items()
+        }
 
         # kept until the files are created; the code does not need to be in memory after
         self.__code: tuple[list[str], list[str]] | None = (
@@ -405,7 +427,9 @@ class Task:
         while self._tests_pending:
             self._tests_pending = False
             tracing = self.__tracing
-            plugin = LiveTestCollectionPlugin(self.tests, tracing=tracing)
+            plugin = LiveTestCollectionPlugin(
+                self.tests, tracing=tracing, sections=self.sections
+            )
 
             with _pytest_lock, terminal.preserve_terminal_mode():
                 pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
@@ -478,8 +502,9 @@ class Task:
         Returns
         -------
         dict[str, Any]
-            ``name``, ``instructions``, ``ex_files``, ``sol_files``, ``tests`` and
-            ``help``, and the contents stored for the exercise and solution files as
+            ``name``, ``instructions``, ``ex_files``, ``sol_files``, ``tests``,
+            ``help`` and ``sections`` (by notebook path, resolved like ``ex_files``),
+            and the contents stored for the exercise and solution files as
             ``file_contents``, by path.
         """
         raw_json = _load_task_json(fp)
@@ -504,6 +529,7 @@ class Task:
             "tests": tests,
             "file_contents": file_contents,
             "help": _hint_list(raw_json.get("help")),
+            "sections": _read_sections(raw_json, base),
         }
 
     @staticmethod
@@ -516,6 +542,7 @@ class Task:
         tests: Union[Test, list[Test], None] = None,
         file_contents: Mapping[StrPath, str] | None = None,
         help: str | Sequence[str] | None = None,
+        sections: Mapping[StrPath, str] | None = None,
     ) -> Path:
         """
         Create a task_json from all relevant information as it would naturally be available
@@ -549,12 +576,24 @@ class Task:
         help: str | Sequence[str] | None
             Hint or list of hints for the task, which the student can reveal one at a
             time, in order.
+        sections: Mapping[StrPath, str] | None
+            The section the task is about (see ``pyics.notebook.sections``) of some of
+            its exercise notebooks, by path. Its tests inherit it, unless they have a
+            section of their own. Stored as ``sections``, by the notebook's path
+            relative to the task file (with forward slashes), and left out if empty.
+            Older versions of pyics ignore it.
 
         Returns
         -------
         Path
             The path the task file was written to, with its suffix normalized to
             '.pyicstask.json'.
+
+        Raises
+        ------
+        ValueError
+            If a path of ``sections`` isn't one of the exercise notebooks, or a name in
+            it can't be the name of a section.
         """
         fp = Path(fp)
         base = fp.parent
@@ -568,6 +607,18 @@ class Task:
         sol_files = _path_list(sol_files)
         task["ex_files"] = [paths.relative_to(f, base) for f in ex_files]
         task["sol_files"] = [paths.relative_to(f, base) for f in sol_files]
+
+        notebooks = {paths.absolute(f) for f in ex_files if cells.is_notebook(f)}
+        stored_sections = {}
+        for path, section in (sections or {}).items():
+            if paths.absolute(path) not in notebooks:
+                raise ValueError(
+                    f"{path} has a section, but isn't one of the exercise notebooks"
+                )
+            key = paths.relative_to(path, base).as_posix()
+            stored_sections[key] = notebook_sections.check_name(section)
+        if stored_sections:
+            task["sections"] = stored_sections
 
         contents = {paths.absolute(f): c for f, c in (file_contents or {}).items()}
 

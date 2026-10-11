@@ -1,5 +1,8 @@
 import dataclasses
+from collections.abc import Mapping
 from os import PathLike
+from pathlib import Path
+from types import MappingProxyType
 from typing import Literal
 
 import pytest
@@ -12,8 +15,10 @@ from rich.text import Text
 
 from pyics.notebook import loader
 from pyics.tests import Test
-from pyics.tests.tests import MarkupAssertionError
+from pyics.tests.tests import TASK_SECTIONS, MarkupAssertionError
 from pyics.tests.trace import Trace
+from pyics.util import paths
+from pyics.util.paths import StrPath
 
 
 @dataclasses.dataclass(eq=False)
@@ -40,12 +45,23 @@ class PyicsItem(pytest.Item):
     """
 
     def __init__(
-        self, *, name: str, parent: Node, test_obj: Test, tracing: bool = False
+        self,
+        *,
+        name: str,
+        parent: Node,
+        test_obj: Test,
+        tracing: bool = False,
+        sections: Mapping[StrPath, str] | None = None,
     ):
         self.test_obj = test_obj
         # whether the test is traced, if it can be (see ``Test.run``), to show the trace
         # if it fails
         self.tracing = tracing
+        # the sections of its task, which it inherits while it runs (see
+        # ``TASK_SECTIONS``)
+        self.sections: Mapping[Path, str] = MappingProxyType(
+            {paths.absolute(path): name for path, name in (sections or {}).items()}
+        )
         self.recorded_trace: Trace | None = None
         # the errors in the cells of a notebook the test ran, named if it fails
         self.cell_errors: list[loader.CellError] = []
@@ -53,6 +69,7 @@ class PyicsItem(pytest.Item):
 
     def runtest(self) -> None:
         loader.clear_last_errors()
+        task_sections = TASK_SECTIONS.set(self.sections)
         try:
             if not (self.tracing and self.test_obj.supports_trace):
                 self.test_obj.run()
@@ -62,6 +79,7 @@ class PyicsItem(pytest.Item):
             self.test_obj.run(trace=self.recorded_trace)
         finally:
             self.cell_errors = loader.last_errors()
+            TASK_SECTIONS.reset(task_sections)
 
     def repr_failure(
         self,
@@ -114,7 +132,13 @@ class LiveTestCollectionPlugin:
     This plugin is used for the main pyics script.
     """
 
-    def __init__(self, test_objs: list[Test], *, tracing: bool = False):
+    def __init__(
+        self,
+        test_objs: list[Test],
+        *,
+        tracing: bool = False,
+        sections: Mapping[StrPath, str] | None = None,
+    ):
         """
         Parameters
         ----------
@@ -123,15 +147,26 @@ class LiveTestCollectionPlugin:
         tracing: bool (optional, keyword only)
             Trace the tests that can be traced, to show their traces if they fail (see
             ``PyicsItem``). Default is False.
+        sections: Mapping[StrPath, str] | None (optional, keyword only)
+            The section of each exercise notebook that the tests' task is about (see
+            ``Task.sections``), which tests that weren't given a section of their own
+            inherit (see ``Test.resolved_section``). Default is None, i.e. none.
         """
         self.test_objs = test_objs
         self.tracing = tracing
+        self.sections = sections
         self.reports = []
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_collection(self, session: pytest.Session):
         session.items = [
-            PyicsItem.from_parent(session, name="", test_obj=obj, tracing=self.tracing)
+            PyicsItem.from_parent(
+                session,
+                name="",
+                test_obj=obj,
+                tracing=self.tracing,
+                sections=self.sections,
+            )
             for obj in self.test_objs
         ]
         session.testscollected = len(session.items)
