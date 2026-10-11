@@ -15,6 +15,7 @@ from rich.text import Text
 
 import pyics.util.json_handling as json
 from pyics.distribution.dependencies import ModulePolicy, check_task_data
+from pyics.notebook import cells
 from pyics.util import paths, terminal
 from pyics.util.paths import StrPath
 from pyics.util.logging import get_logger
@@ -542,7 +543,9 @@ class Task:
         file_contents: Mapping[StrPath, str] | None
             Contents to store for some of the exercise and solution files, by path,
             instead of reading these files, e.g. the contents already stored in the task
-            file when editing it (see ``read_task_json``). Other files are read.
+            file when editing it (see ``read_task_json``). Other files are read. The
+            contents of notebooks are stored normalized (see ``cells.normalize``), e.g.
+            without their outputs.
         help: str | Sequence[str] | None
             Hint or list of hints for the task, which the student can reveal one at a
             time, in order.
@@ -570,8 +573,13 @@ class Task:
 
         def read(f: StrPath) -> str:
             if (key := paths.absolute(f)) in contents:
-                return contents[key]
-            return Path(f).read_text(encoding="utf-8")
+                text = contents[key]
+            else:
+                text = Path(f).read_text(encoding="utf-8")
+            if cells.is_notebook(f):
+                # without outputs, which would leak the solution's, and bloat the file
+                return cells.normalize(text, name=Path(f).name)
+            return text
 
         task["exercise_code"] = [read(f) for f in ex_files]
         task["solution_code"] = [read(f) for f in sol_files]

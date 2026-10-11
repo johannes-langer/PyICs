@@ -11,6 +11,7 @@ import inspect
 import io
 import json as std_json
 import os
+import queue
 import sys
 import threading
 import time
@@ -18,6 +19,7 @@ import traceback
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import ModuleType
+from unittest.mock import MagicMock
 
 import pytest
 from notebook_helpers import (
@@ -31,9 +33,11 @@ from notebook_helpers import (
 from rich.console import Console
 from rich.text import Text
 
+from pyics.app.prompts import PromptSession
 from pyics.data import Course, Task
 from pyics.notebook import cells, loader
 from pyics.notebook.cells import Cell, NotebookError
+from pyics.scripts.create_task import _edit_files
 from pyics.tests.check_structure import check_structure
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin, RichFailureRepr
 from pyics.tests.tests import (
@@ -148,6 +152,141 @@ def test_nbformat_3_is_refused_with_how_to_convert_it(chdir: Path) -> None:
 def test_other_files_arent_notebooks(text: str, reason: str) -> None:
     with pytest.raises(NotebookError, match=f"^Can't read the notebook: {reason}"):
         cells.parse(text)
+
+
+# --- storing notebooks ---
+
+
+def _run_notebook_text(source: str = "print('hi')") -> str:
+    """A notebook as Jupyter saves it once it has been run."""
+    return notebook_text(
+        make_notebook(
+            [
+                markdown("# Greeting", metadata={"collapsed": False}),
+                code(
+                    source,
+                    outputs=[stream("hi\n")],
+                    execution_count=3,
+                    tags=["keep"],
+                    metadata={
+                        "execution": {"iopub.status.busy": "2026-10-11T09:00:00Z"},
+                        "scrolled": True,
+                    },
+                ),
+            ],
+            metadata={
+                "kernelspec": {"name": "python3", "display_name": "Python 3"},
+                "language_info": {"name": "python", "version": "3.14.0"},
+                "title": "Greetings",
+            },
+        )
+    )
+
+
+def test_normalized_notebooks_keep_only_what_their_author_wrote() -> None:
+    normalized = cells.normalize(_run_notebook_text())
+    nb = std_json.loads(normalized)
+    assert nb["metadata"] == {"kernelspec": cells.KERNELSPEC, "title": "Greetings"}
+    greeting, printing = nb["cells"]
+    assert greeting == {
+        "cell_type": "markdown",
+        "id": "cell-1",
+        "metadata": {},
+        "source": ["# Greeting"],
+    }
+    assert printing["outputs"] == []
+    assert printing["execution_count"] is None
+    assert printing["metadata"] == {"tags": ["keep"]}
+
+    # normalizing is idempotent, and keeps the cells
+    assert cells.normalize(normalized) == normalized
+    original = cells.cells(cells.parse(_run_notebook_text()))
+    assert cells.cells(cells.parse(normalized)) == original
+
+
+def _notebook_text(source: str = "print('hi')") -> str:
+    """The notebook of ``_run_notebook_text`` before it has been run."""
+    return notebook_text(
+        make_notebook(
+            [markdown("# Greeting"), code(source, tags=["keep"])],
+            metadata={"title": "Greetings"},
+        )
+    )
+
+
+def test_a_notebook_that_was_merely_run_is_stored_the_same() -> None:
+    assert cells.normalize(_run_notebook_text()) == cells.normalize(_notebook_text())
+    changed = _run_notebook_text("print('hello')")
+    assert cells.normalize(changed) != cells.normalize(_notebook_text())
+
+
+def test_cell_text() -> None:
+    text = notebook_text(
+        [markdown("# Exercise\n\nWrite bfs."), "import math\n\nx = 1\n", "y = 2"]
+    )
+    assert cells.as_cell_text(text) == (
+        "# %% [markdown] cell 1\n# # Exercise\n#\n# Write bfs.\n\n"
+        "# %% cell 2\nimport math\n\nx = 1\n\n"
+        "# %% cell 3\ny = 2\n"
+    )
+
+
+def test_task_files_store_notebooks_normalized(chdir: Path) -> None:
+    ex, sol = Path("ex.ipynb"), Path("sol.ipynb")
+    ex.write_text(_run_notebook_text())
+    sol.write_text(_run_notebook_text("print('solution')"))
+    task_file = Task.create_task_json(Path("t"), "T", "", ex, sol)
+
+    fields = Task.read_task_json(task_file)
+    stored = fields["file_contents"]
+    assert stored[ex] == cells.normalize(ex.read_text())
+    assert stored[sol] == cells.normalize(sol.read_text())
+
+    # rewriting the task keeps it as it is
+    original = task_file.read_text()
+    Task.create_task_json(task_file, **fields)
+    assert task_file.read_text() == original
+
+    # the files are created from the stored contents, which load as the same notebook
+    ex.unlink()
+    task = Task(task_file, setup=False)
+    task.create_files([stored[ex]], [stored[sol]])
+    assert ex.read_text() == stored[ex]
+    assert cells.cells(cells.read(ex)) == cells.cells(cells.parse(_run_notebook_text()))
+
+
+def _edit_shows(path: Path, stored: str) -> str:
+    """What editing a task shows for its exercise notebook at ``path``, whose contents
+    stored in the task file are ``stored``. Keeps the notebook as it is."""
+    q: queue.Queue[str] = queue.Queue()
+    for key in ["\r", "\r", "\x03"]:  # keep it, add no other file, (ctrl-c)
+        q.put(key)
+    cli = MagicMock()
+    s = PromptSession(cli, q)
+    files, contents, _ = s.run(
+        lambda s: _edit_files(s, "exercise", [path], {path: stored})
+    )
+    assert (files, contents) == ([path], {path: stored})
+    assert q.get_nowait() == "\x03", "all prompts were answered"
+
+    calls = cli.update_main_content.call_args_list
+    title = f"Exercise file {path}"
+    renderable = next(c.args[0] for c in reversed(calls) if c.kwargs["title"] == title)
+    console = Console(width=100, record=True, file=io.StringIO())
+    console.print(renderable)
+    return console.export_text()
+
+
+def test_editing_a_task_ignores_that_its_notebook_was_run(chdir: Path) -> None:
+    path = chdir / "ex.ipynb"
+    stored = cells.normalize(_notebook_text())
+    path.write_text(_run_notebook_text())  # with outputs, kernel info, ...
+    assert "Update" not in _edit_shows(path, stored)
+
+    path.write_text(_run_notebook_text("print('hello')"))
+    shown = _edit_shows(path, stored)
+    assert "Update" in shown
+    assert "The file on disk differs from the stored contents" in shown
 
 
 # --- running notebooks ---

@@ -26,6 +26,7 @@ from pyics.app.prompts import (
     TextInput,
 )
 from pyics.data.task import Task
+from pyics.notebook import cells
 from pyics.tests import Test, check_specs, check_structure
 from pyics.tests.tests import PrintTest, SimpleTest, SpecTest, StructureTest
 from pyics.util import paths
@@ -124,6 +125,18 @@ def _read(path: PathLike) -> str | None:
         return None
 
 
+def _as_stored(path: PathLike, text: str | None) -> str | None:
+    """``text``, the contents of the file at ``path``, as a task file stores them:
+    normalized for a notebook (see ``cells.normalize``), so that e.g. its outputs don't
+    count as changes. As it is if it can't be read as a notebook."""
+    if text is None or not cells.is_notebook(path):
+        return text
+    try:
+        return cells.normalize(text)
+    except cells.NotebookError:
+        return text
+
+
 def _diff(stored: str, on_disk: str) -> RenderableType:
     """How a file ``on_disk`` differs from its ``stored`` contents, as a unified diff of
     at most ``_MAX_DIFF_LINES`` lines."""
@@ -160,7 +173,8 @@ def _edit_files(
     moved: dict[Path, Path | None] = {}
 
     for i, path in enumerate(current):
-        in_task, on_disk = stored.get(path), _read(path)
+        in_task = _as_stored(path, stored.get(path))
+        on_disk = _as_stored(path, _read(path))
 
         options, hints, details = [], {}, None
         if in_task is not None:
