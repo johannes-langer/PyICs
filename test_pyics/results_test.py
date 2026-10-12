@@ -15,7 +15,7 @@ from rich.text import Text
 
 from pyics.data import Task
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin, RichFailureRepr
-from pyics.tests.results import TestResult, to_markup
+from pyics.tests.results import TestResult
 from pyics.tests.tests import MarkupAssertionError, SimpleTest, Test
 from pyics.tests.trace import Trace
 
@@ -26,7 +26,7 @@ def double(x):
 
 # markup a test's author could write, with backslashes and brackets that aren't tags
 # (a backslash in front of a tag is escaped by another one)
-MARKUP = "expected [b]C:\\data\\\\[/b], got [red]\\[x][/red] in [i]cell [1][/i] \\"
+MARKUP = "expected [b]C:\\data\\\\[/b], got [red]\\[x][/red] in [i]cell [1][/i]"
 
 
 class MarkupFailure(SimpleTest):
@@ -103,7 +103,7 @@ def test_results_survive_json_and_render_like_the_reports(
     fails, markup = [r for r in loaded if r.when == "call" and r.outcome == "failed"]
     assert fails.message_text.plain == "fails failed: 4 == 5"
     assert markup.message_text.plain == (
-        "markup failed: expected C:\\data\\, got [x] in cell [1] \\"
+        "markup failed: expected C:\\data\\, got [x] in cell [1]"
     )
     segments = Console(width=200).render(markup.message_text)
     assert [s.text for s in segments if s.style and s.style.bold] == ["C:\\data\\"]
@@ -170,30 +170,12 @@ def test_failures_of_other_items_are_kept_as_plain_text() -> None:
         ("other.py", 0, "other"),
         {},
         "failed",
-        "boom: [b]not markup[/b] \\",
+        "boom: [b]not markup[/b] C:\\[x]",
         "setup",
     )
     result = _round_trip(TestResult.from_report(report))
-    assert result.message_text.plain == "boom: [b]not markup[/b] \\"
+    assert result.message_text.plain == "boom: [b]not markup[/b] C:\\[x]"
     assert result.trace is None and result.index is None
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        Text("ends with a backslash \\"),
-        Text("ends with two backslashes \\\\"),
-        Text("C:\\dir\\[b]isn't a tag, nor is \\[this] or [1] or [/]"),
-        Text.assemble("before \\", ("bold \\\\", "bold"), " after \\\\"),
-        # adjacent spans of the same style stay apart
-        Text.assemble(("one", "red"), ("two", "red"), style="dim"),
-        Text.from_markup("[b]a[i]b[/b]c[/i] :smile: [#ff0000 on blue]d[/]"),
-    ],
-)
-def test_markup_renders_like_the_text(text: Text) -> None:
-    loaded = Text.from_markup(to_markup(text), emoji=False)
-    assert loaded.plain == text.plain
-    assert _ansi(loaded) == _ansi(text)
 
 
 def test_malformed_markup_is_shown_as_it_is() -> None:

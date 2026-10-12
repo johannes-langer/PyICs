@@ -159,6 +159,9 @@ def test_other_files_arent_notebooks(text: str, reason: str) -> None:
 
 # --- storing notebooks ---
 
+# the kernel its author chose, which is stored with the notebook
+PYTHON3 = {"name": "python3", "display_name": "Python 3"}
+
 
 def _run_notebook_text(source: str = "print('hi')") -> str:
     """A notebook as Jupyter saves it once it has been run."""
@@ -178,7 +181,7 @@ def _run_notebook_text(source: str = "print('hi')") -> str:
                 ),
             ],
             metadata={
-                "kernelspec": {"name": "python3", "display_name": "Python 3"},
+                "kernelspec": PYTHON3,
                 "language_info": {"name": "python", "version": "3.14.0"},
                 "title": "Greetings",
             },
@@ -189,7 +192,7 @@ def _run_notebook_text(source: str = "print('hi')") -> str:
 def test_normalized_notebooks_keep_only_what_their_author_wrote() -> None:
     normalized = cells.normalize(_run_notebook_text())
     nb = std_json.loads(normalized)
-    assert nb["metadata"] == {"kernelspec": cells.KERNELSPEC, "title": "Greetings"}
+    assert nb["metadata"] == {"kernelspec": PYTHON3, "title": "Greetings"}
     greeting, printing = nb["cells"]
     assert greeting == {
         "cell_type": "markdown",
@@ -212,7 +215,7 @@ def _notebook_text(source: str = "print('hi')") -> str:
     return notebook_text(
         make_notebook(
             [markdown("# Greeting"), code(source, tags=["keep"])],
-            metadata={"title": "Greetings"},
+            metadata={"kernelspec": PYTHON3, "title": "Greetings"},
         )
     )
 

@@ -1,75 +1,20 @@
 """
 Test results as plain data, which can cross a process boundary: written as JSON by the
-process that ran the tests (e.g. a notebook's kernel, see ``pyics.notebook.channel``),
-and shown by another (the TUI), exactly as if it had run them itself.
+process that ran the tests (e.g. a notebook's kernel, see ``pyics.plugins``), and shown
+by another (the TUI) as if it had run them itself.
 """
 
 import dataclasses
 import math
-import re
 from collections.abc import Mapping
 from typing import Any, Self
 
 import pytest
 from rich.errors import MarkupError
-from rich.text import Span, Text
+from rich.markup import escape
+from rich.text import Text
 
 from pyics.tests.trace import ansi_text
-
-# Backslashes in plain text that rich's markup parser (``rich.markup.render``) would
-# take away: the ones in front of what it takes for a tag (group 2), which escape it
-# (one) or each other (two), and the last one in front of any other "[" (group 3)
-_UNESCAPE = re.compile(r"(\\*)(\[[a-z#/@][^[]*?])|(\\+)(?=\[)")
-
-
-def _escape(plain: str, *, tag_follows: bool) -> str:
-    """``plain`` as markup that renders as ``plain``, followed by a tag (``tag_follows``)
-    or by nothing."""
-
-    def escape(match: re.Match[str]) -> str:
-        if match[2] is not None:
-            return f"{match[1]}{match[1]}\\{match[2]}"
-        return f"{match[3]}\\"
-
-    escaped = _UNESCAPE.sub(escape, plain)
-    if tag_follows:
-        # trailing backslashes would escape the tag after them
-        escaped += "\\" * (len(escaped) - len(escaped.rstrip("\\")))
-    return escaped
-
-
-def to_markup(text: Text) -> str:
-    """
-    Console markup of ``text``, which ``Text.from_markup(markup, emoji=False)`` turns back
-    into text that renders the same.
-
-    Like ``Text.markup``, which loses backslashes in front of "[" and at the end of the
-    text, and joins adjacent spans of the same style.
-    """
-    plain = text.plain
-    spans = [Span(0, len(plain), text.style), *text.spans]
-    tags: list[tuple[int, int, int, int, str]] = []
-    for i, (start, end, style) in enumerate(spans):
-        if not style:
-            continue
-        if end <= start:  # empty, but it still splits the text where it is
-            tags.append((start, 1, 0, i, f"[{style}][/{style}]"))
-            continue
-        tags.append((start, 1, 0, i, f"[{style}]"))
-        # at the same offset, spans are closed before others are opened, and in the
-        # reverse order of their opening
-        tags.append((end, 0, -start, -i, f"[/{style}]"))
-    tags.sort(key=lambda tag: tag[:4])
-    output: list[str] = []
-    position = 0
-    for offset, *_, tag in tags:
-        if offset > position:
-            output.append(_escape(plain[position:offset], tag_follows=True))
-            position = offset
-        output.append(tag)
-    output.append(_escape(plain[position:], tag_follows=False))
-    return "".join(output)
-
 
 def _field(data: Mapping[str, Any], name: str, *types: type) -> Any:
     """``data[name]``, which must be of one of ``types`` (a missing key counts as None).
@@ -182,13 +127,13 @@ class TestResult:
 
         message = trace = None
         if isinstance(report.longrepr, RichFailureRepr):
-            message = to_markup(report.longrepr.text)
+            message = report.longrepr.text.markup
             trace = report.longrepr.trace_ansi
         elif report.skipped and isinstance(report.longrepr, tuple):
             # (file, line, reason) of a skipped test
-            message = to_markup(Text(str(report.longrepr[-1])))
+            message = escape(str(report.longrepr[-1]))
         elif not report.passed:
-            message = to_markup(Text(report.longreprtext))
+            message = escape(report.longreprtext)
         return cls(
             nodeid=report.nodeid,
             when=report.when,

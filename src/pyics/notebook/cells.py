@@ -14,9 +14,6 @@ from typing import Any
 from pyics.util.paths import StrPath
 
 NOTEBOOK_SUFFIX = ".ipynb"
-# the kernel exercise notebooks are opened with (see ``normalize``): the "Python (pyics)"
-# kernel, which runs in pyics's own environment
-KERNELSPEC = {"name": "pyics", "display_name": "Python (pyics)", "language": "python"}
 
 # metadata that running a notebook (or looking at its outputs) changes, and that the
 # frontend fills in again: of the notebook, and of its cells
@@ -133,10 +130,10 @@ def code_cells(nb: dict[str, Any]) -> list[Cell]:
 def normalize(text: str, *, name: str | None = None) -> str:
     """
     The notebook ``text`` as task files store it: without what running it changes, i.e.
-    its outputs, execution counts and the metadata of the run (e.g. execution times),
-    and with the pyics kernel as its kernel (see ``KERNELSPEC``). Sources are stored as
-    lists of lines, and the JSON is written like Jupyter writes it, so that a notebook
-    that was merely run, or saved by another frontend, is stored the same.
+    its outputs, execution counts and the metadata of the run (e.g. execution times).
+    Sources are stored as lists of lines, and the JSON is written like Jupyter writes
+    it, so that a notebook that was merely run, or saved by another frontend, is stored
+    the same.
 
     ``name``, e.g. the notebook's file name, is used in messages.
 
@@ -160,7 +157,6 @@ def normalize(text: str, *, name: str | None = None) -> str:
         metadata = nb["metadata"] = {}
     for key in _RUN_METADATA:
         metadata.pop(key, None)
-    metadata["kernelspec"] = dict(KERNELSPEC)
     return json.dumps(nb, indent=1, sort_keys=True, ensure_ascii=False) + "\n"
 
 
