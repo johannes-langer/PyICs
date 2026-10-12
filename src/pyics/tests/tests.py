@@ -41,56 +41,29 @@ TASK_SECTIONS: ContextVar[Mapping[Path, str]] = ContextVar(
 )
 
 
-class SolutionSource(Protocol):
+class LiveSource(Protocol):
     """
-    Where tests take the code under test from in a live run (see ``SOLUTION_SOURCE``),
-    rather than from a fresh run of the saved exercise file: e.g. a notebook's kernel,
-    whose objects are tested as they are currently defined (see
-    ``pyics.notebook.extension``).
+    Where tests take the code under test from while they run on code that isn't saved
+    yet (see ``LIVE_SOURCE``), e.g. on the objects a notebook's kernel defines.
     """
 
-    def covers(self, path: StrPath) -> bool:
-        """Whether this source holds the code of the exercise file at ``path``. Tests
-        of other files load them as usual."""
-        ...
-
-    def module(self, trace: Trace | None = None) -> ModuleType:
-        """
-        The code under test as a module, e.g. a view of the kernel's namespace. With
-        ``trace``, the code defined in it is watched by it (see ``Trace.watch``).
-        """
-        ...
-
-    def python_source(
-        self, path: StrPath, *, section: str | None = None
-    ) -> loader.NotebookSource:
-        """
-        The code cells of the notebook at ``path`` as they were last run, like
-        ``loader.python_source`` gives them as they were saved: of its section
-        ``section`` only, if given.
-
-        Raises
-        ------
-        SectionNotFound
-            If the notebook has no section ``section``.
-        """
+    def module(self, path: StrPath) -> ModuleType | None:
+        """The code of the exercise file at ``path`` as a module, or None if this
+        source doesn't hold it, so that the file is loaded as usual."""
         ...
 
 
-# Set while the tests of a live run run (e.g. by the kernel extension, see
-# ``pyics.notebook.extension``): the tests of the files it covers test its code rather
-# than that of the saved files (see ``Test.load_solution`` and ``StructureTest``), and
-# ``PrintTest``s are skipped, as they need a fresh run of the whole file.
-SOLUTION_SOURCE: ContextVar[SolutionSource | None] = ContextVar(
-    "SOLUTION_SOURCE", default=None
-)
+# Set by a plugin while the tests run on code that isn't saved yet (see ``LiveSource``):
+# ``Test.load_solution`` takes the code of the files it holds from it, and
+# ``PrintTest``s and ``StructureTest``s are skipped, as they run on the saved file.
+LIVE_SOURCE: ContextVar[LiveSource | None] = ContextVar("LIVE_SOURCE", default=None)
 
 
-def _live_source(path: StrPath) -> SolutionSource | None:
-    """The source of the live run that covers the file at ``path``, if one is
-    running."""
-    source = SOLUTION_SOURCE.get()
-    return source if source is not None and source.covers(path) else None
+def _skip_live_run() -> None:
+    """Skip the running test if it runs on code that isn't saved yet (see
+    ``LIVE_SOURCE``)."""
+    if LIVE_SOURCE.get() is not None:
+        pytest.skip("runs when the notebook is saved")
 
 
 class MarkupAssertionError(AssertionError):
@@ -135,11 +108,13 @@ class Test(ABC):
         whole, while importing a module isn't.
 
         A notebook's code cells are run instead (see ``loader.run_notebook``), where an
-        error in a cell doesn't stop the run. In a live run that covers the file (see
-        ``SOLUTION_SOURCE``), its code is taken from there instead.
+        error in a cell doesn't stop the run. While a ``LIVE_SOURCE`` that holds the
+        file is set, its module is returned instead, untraced.
         """
-        if (source := _live_source(self.file_path)) is not None:
-            return source.module(trace)
+        if (source := LIVE_SOURCE.get()) is not None and (
+            module := source.module(self.file_path)
+        ) is not None:
+            return module
         if cells.is_notebook(self.file_path):
             return loader.load_module(self.file_path, as_main=as_main, trace=trace)
 
@@ -216,7 +191,7 @@ class PrintTest(Test):
     run, but only the output of the section's cells is compared. A test that isn't
     given a ``section`` inherits its task's; None compares the output of all cells.
 
-    In a live run (see ``SOLUTION_SOURCE``), it is skipped.
+    While a ``LIVE_SOURCE`` is set, it is skipped.
     """
 
     expected: str  # printout is necessarily str
@@ -251,9 +226,7 @@ class PrintTest(Test):
             self.section = None if section is None else sections.check_name(section)
 
     def run(self, trace: Trace | None = None) -> None:
-        if SOLUTION_SOURCE.get() is not None:
-            # a live run: the output needs a fresh run of the whole file
-            pytest.skip("runs when the notebook is saved")
+        _skip_live_run()
         trace = trace if self.traceable else None
         with capture_stdout() as buffer, provide_input(self.inputs):
             if cells.is_notebook(self.file_path):
@@ -389,8 +362,9 @@ class StructureTest(Test):
     ``Test.resolved_section``), only the code cells of that section are checked, and
     the test fails if one of them can't be parsed. A test that isn't given a
     ``section`` inherits its task's; None checks all code cells, leaving out those that
-    can't be parsed (they are named if the test fails). In a live run that covers the
-    notebook (see ``SOLUTION_SOURCE``), the cells are checked as they were last run.
+    can't be parsed (they are named if the test fails).
+
+    While a ``LIVE_SOURCE`` is set, it is skipped.
     """
 
     rules: list[check_structure.Rule]
@@ -414,11 +388,11 @@ class StructureTest(Test):
             self.section = None if section is None else sections.check_name(section)
 
     def run(self, trace: Trace | None = None) -> None:
+        _skip_live_run()
         path = Path(self.file_path)
         if cells.is_notebook(path):
             section = self.resolved_section()
-            # in a live run, the cells as they were last run
-            source = (_live_source(path) or loader).python_source(path, section=section)
+            source = loader.python_source(path, section=section)
             diff = self._check_notebook(source, path.name, whole=section is None)
         else:
             diff = check_structure.check_structure(

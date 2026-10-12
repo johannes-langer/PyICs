@@ -359,7 +359,9 @@ class Course:
 
         1. Calls check_file_changes on the current task
         2. Calls run_tests on the current task if files have changed.
-        3. checks if the course progress needs to be updated
+        3. Calls check_overlay on the current task, to show the results of a plugin's
+           overlay (which never count as progress)
+        4. checks if the course progress needs to be updated
 
         Returns
         -------
@@ -378,6 +380,8 @@ class Course:
 
         if files_changed:
             self.__current_task.run_tests()
+
+        self.__current_task.check_overlay()
 
         current_task_number = self.__current_task_number()
         solved = int(self.__current_task.solved)

@@ -221,9 +221,8 @@ class NotebookSource:
         return f"line {line}"
 
 
-def source_of(code_cells: Iterable[Cell]) -> NotebookSource:
-    """``code_cells`` as Python source (see ``python_source``), e.g. cells whose source
-    was changed."""
+def _source_of(code_cells: Iterable[Cell]) -> NotebookSource:
+    """``code_cells`` as Python source (see ``python_source``)."""
     parts: list[str] = []
     included: list[Cell] = []
     unparsable: list[tuple[Cell, SyntaxError]] = []
@@ -271,8 +270,8 @@ def python_source(
     """
     nb = path_or_nb if isinstance(path_or_nb, dict) else cells.read(path_or_nb)
     if section is None:
-        return source_of(cells.code_cells(nb))
-    return source_of(sections.get_section(nb, section).code_cells)
+        return _source_of(cells.code_cells(nb))
+    return _source_of(sections.get_section(nb, section).code_cells)
 
 
 # --- running cells ---
