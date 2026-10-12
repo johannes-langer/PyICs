@@ -7,6 +7,12 @@ resolution-markers = [
     "sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[manifest]
+members = [
+    "pyics",
+    "pyics-jupyter",
+]
+
 [[package]]
 name = "appnope"
 version = "1.0.0"
@@ -451,6 +457,11 @@ dependencies = [
     { name = "snoop" },
 ]
 
+[package.optional-dependencies]
+jupyter = [
+    { name = "pyics-jupyter" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "colorama", marker = "sys_platform == 'win32'", specifier = ">=0.4.6" },
@@ -462,10 +473,29 @@ requires-dist = [
     { name = "pluggy", specifier = ">=1.5" },
     { name = "prompt-toolkit", specifier = ">=3.0.53" },
     { name = "pyfiglet", specifier = ">=1.0.4" },
+    { name = "pyics-jupyter", marker = "extra == 'jupyter'", editable = "plugins/pyics-jupyter" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "ruff", specifier = ">=0.15.12" },
     { name = "snoop", specifier = ">=0.6.0" },
+]
+provides-extras = ["jupyter"]
+
+[[package]]
+name = "pyics-jupyter"
+version = "0.0.1"
+source = { editable = "plugins/pyics-jupyter" }
+dependencies = [
+    { name = "ipykernel" },
+    { name = "jupyter-client" },
+    { name = "pyics" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ipykernel", specifier = ">=7.3.0" },
+    { name = "jupyter-client" },
+    { name = "pyics", editable = "." },
 ]
 
 [[package]]

@@ -1,0 +1,24 @@
+[project]
+name = "pyics-jupyter"
+version = "0.0.1"
+description = "Live results for PyICs: the tests of a notebook's tasks run in its Jupyter kernel whenever a cell runs, and PyICs shows their results."
+readme = "README.md"
+authors = [
+    { name = "johannes-langer", email = "johannes.langer@uni-bamberg.de" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "pyics",
+    "ipykernel>=7.3.0",
+    "jupyter-client",
+]
+
+[project.entry-points.pyics]
+jupyter = "pyics_jupyter.plugin"
+
+[tool.uv.sources]
+pyics = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.11.8,<0.12.0"]
+build-backend = "uv_build"

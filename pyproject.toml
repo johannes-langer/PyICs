@@ -23,8 +23,18 @@ dependencies = [
     "snoop>=0.6.0",
 ]
 
+[project.optional-dependencies]
+# live results in notebooks (see plugins/pyics-jupyter)
+jupyter = ["pyics-jupyter"]
+
 [project.scripts]
 pyics = "pyics.scripts.main:run"
+
+[tool.uv.workspace]
+members = ["plugins/*"]
+
+[tool.uv.sources]
+pyics-jupyter = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.11.8,<0.12.0"]
