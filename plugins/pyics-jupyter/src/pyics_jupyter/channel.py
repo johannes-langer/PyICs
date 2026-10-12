@@ -112,7 +112,7 @@ def cleanup_stale(
     with contextlib.suppress(OSError), os.scandir(directory) as entries:
         for entry in list(entries):
             with contextlib.suppress(OSError):
-                if now - entry.stat().st_mtime > stale_after:
+                if now - os.stat(entry.path).st_mtime > stale_after:
                     os.remove(entry.path)
 
 
@@ -196,7 +196,8 @@ def read_kernels(
             if not (entry.name.startswith("kernel-") and entry.name.endswith(".json")):
                 continue
             try:
-                if now - entry.stat().st_mtime > timeout:
+                # not ``entry.stat()``: on Windows, it may lag behind the heartbeat
+                if now - os.stat(entry.path).st_mtime > timeout:
                     continue
                 # briefly, so that the TUI stays responsive: it reads again soon
                 kernels.append(KernelFile.from_json(read_json(Path(entry.path), 0.05)))

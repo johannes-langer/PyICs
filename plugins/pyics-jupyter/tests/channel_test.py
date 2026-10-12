@@ -178,9 +178,7 @@ def _payload(i: int) -> list[TestResult]:
     return [PASSED] * (i % 7) + [FAILED] * (i % 11)
 
 
-def test_readers_never_see_a_partly_written_file(
-    notebook: Path, kernel: Callable[[], KernelChannel]
-) -> None:
+def test_readers_never_see_a_partly_written_file(notebook: Path) -> None:
     k = KernelChannel(notebook)
     k.open(heartbeat=False)
     task = notebook.parent / "add.pyicstask.json"
@@ -201,7 +199,9 @@ def test_readers_never_see_a_partly_written_file(
     seen: list[int] = []
     try:
         while not done.is_set() or len(seen) < 50:
-            (found,) = read_kernels(k.path.parent, now=time.time())
+            data = read_json(k.path)
+            assert data is not None, "a partly written file was read"
+            found = KernelFile.from_json(data)
             if found.cell is not None:
                 assert found.tasks[same_file(task)] == tuple(_payload(found.cell))
                 seen.append(found.cell)
