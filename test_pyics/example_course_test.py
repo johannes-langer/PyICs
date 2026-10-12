@@ -22,7 +22,7 @@ def course_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     working directory."""
     root = tmp_path / "search_notebook"
     shutil.copytree(
-        EXAMPLE, root, ignore=shutil.ignore_patterns(".solutions", "*.ipynb", ".pyics")
+        EXAMPLE, root, ignore=shutil.ignore_patterns(".solutions", "*.ipynb")
     )
     monkeypatch.chdir(tmp_path)
     return root
