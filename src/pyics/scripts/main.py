@@ -13,7 +13,6 @@ from pyics.scripts.create_course import _create_course
 from pyics.scripts.create_task import _create_task
 from pyics.scripts.edit_course import _edit_course
 from pyics.scripts.edit_task import _edit_task
-from pyics.scripts.install_kernel import _install_kernel
 from pyics.scripts.pack import _build_index, _pack
 from pyics.scripts.pull import _pull, _update
 from pyics.scripts.sources import _add_source, _remove_source, _search, _sources
@@ -59,10 +58,6 @@ _SUBCOMMANDS = {
     "update": (_update, "Update a pulled course, keeping your work."),
     "pack": (_pack, "Pack a course into an archive, to distribute it."),
     "build_index": (_build_index, "Write the index of a course library."),
-    "install_kernel": (
-        _install_kernel,
-        'Install the "Python (pyics)" Jupyter kernel, which runs tests live.',
-    ),
 }
 
 

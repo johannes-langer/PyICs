@@ -18,12 +18,6 @@ import pyics.util.json_handling as json
 from pyics.distribution.dependencies import ModulePolicy, check_task_data
 from pyics.notebook import cells
 from pyics.notebook import sections as notebook_sections
-from pyics.notebook.channel import (
-    ChannelReader,
-    ChannelState,
-    ChannelStatus,
-    LiveResults,
-)
 from pyics.util import paths, terminal
 from pyics.util.paths import StrPath
 from pyics.util.logging import get_logger
@@ -81,68 +75,6 @@ def _load_task_json(fp: StrPath, module_policy: ModulePolicy | None = None) -> d
         text = f.read()
     check_task_data(json.loads_plain(text), fp, module_policy)
     return json.loads(text)
-
-
-def _by_test(results: Sequence[TestResult]) -> dict[int, list[TestResult]]:
-    """The phases of each test in ``results``, by the test's index (results without
-    one are left out)."""
-    by_test: dict[int, list[TestResult]] = {}
-    for result in results:
-        if result.index is not None:
-            by_test.setdefault(result.index, []).append(result)
-    return by_test
-
-
-def _test_name(nodeid: str) -> str:
-    """The name of the test whose pytest id is ``nodeid``, e.g. "adds" for "::adds"."""
-    return nodeid.rpartition("::")[2] or nodeid
-
-
-def _shown_live(live: list[TestResult], saved: list[TestResult] | None) -> bool:
-    """
-    Whether the ``live`` result of a test (its phases) is shown rather than its
-    ``saved`` one, given that it is newer: unless it was skipped (e.g. a ``PrintTest``,
-    which only runs on the saved files), or it is another test's, or a test the saved
-    files' run doesn't know (the kernel and the TUI loaded different versions of the
-    task file).
-    """
-    if saved is None or live[0].nodeid != saved[0].nodeid:
-        return False
-    return all(r.outcome != "skipped" for r in live)
-
-
-def _describe_run(run: LiveResults) -> str:
-    """The cell and the time of a kernel's live ``run``, e.g. "cell 5, 12:03:41"."""
-    at = time.strftime("%H:%M:%S", time.localtime(run.time))
-    if run.cell is None:
-        return at
-    if run.cell.number is None:  # it isn't in the saved notebook
-        return f"an unsaved cell, {at}"
-    return f"cell {run.cell.number}, {at}"
-
-
-def _describe_kernel(state: ChannelState) -> str:
-    """The connected kernel of a channel's ``state``, named if the notebook has several
-    kernels, e.g. "your notebook kernel with pid 1234, the last of 2 kernels to run a
-    cell"."""
-    kernel, count = state.kernel, len(state.kernels)
-    if kernel is None or count < 2:
-        return "your notebook kernel"
-    pid = "" if kernel.pid is None else f" with pid {kernel.pid}"
-    return f"your notebook kernel{pid}, the last of {count} kernels to run a cell"
-
-
-# the order in which the channels of a task's notebooks are told about, if no kernel
-# of them has results for the task
-_STATUS_ORDER = [
-    ChannelStatus.CONNECTED,
-    ChannelStatus.RESTARTED,
-    ChannelStatus.TIMED_OUT,
-    ChannelStatus.INCOMPATIBLE,
-    ChannelStatus.NO_KERNEL,
-]
-
-SOLVED_LIVE = "Solved in your notebook — save it to count it."
 
 
 def _hint_list(hints: str | Sequence[str] | None) -> list[str]:
@@ -253,23 +185,8 @@ class Task:
         self._tests_lock = threading.Lock()
         self._tests_pending = False
         # when the version of the exercise files that ``test_results`` come from was
-        # saved (see ``shown_results``)
+        # saved: the latest of their modification times when the run started
         self.test_results_time: float | None = None
-
-        # live results: the exercise notebooks' channels, opened by the first
-        # ``check_live_results``, what they said last, the results shown, and where
-        # they come from
-        self.__notebooks = list(
-            dict.fromkeys(
-                paths.absolute(f) for f in self.exercise_files if cells.is_notebook(f)
-            )
-        )
-        self.__channels: dict[Path, ChannelReader] | None = None
-        self.__channel_states: dict[Path, ChannelState] = {}
-        self.live_results: list[TestResult] = []
-        self.live_state: ChannelState | None = None
-        # the status is updated by test runs and by live results, in different threads
-        self.__status_lock = threading.RLock()
 
         self.last_mtimes: dict[Path, float] = {}
         if setup:
@@ -345,38 +262,24 @@ class Task:
 
     def update_status(self) -> None:
         """Update the status from the test reports"""
-        with self.__status_lock:
-            self.__update_status()
-
-    def __update_status(self) -> None:
-        results, live = self.shown_results()
         # filter tests for only call tests
-        relevant_reports = [r for r in results if r.when == "call"]
+        relevant_reports = [r for r in self.test_results if r.when == "call"]
         passed = [r.outcome == "passed" for r in relevant_reports]
         failed_reports = [r for r in relevant_reports if r.outcome == "failed"]
         pass_rate = round(100 * sum(passed) / len(passed)) if passed else 0
 
-        # progress only counts the results of the saved files, never live ones
-        saved = [r.outcome == "passed" for r in self.test_results if r.when == "call"]
-        self.__solved = bool(saved) and round(100 * sum(saved) / len(saved)) == 100
+        self.__solved = pass_rate == 100
 
         # result summary, box=None so the row reaches the panel's own border
         summary = Table(expand=True, show_header=False, box=None, padding=0)
         summary.add_column()
         summary.add_column(justify="right")
         summary.add_row(
-            # live results are underlined
-            "".join(
-                f"[{'bright_green' if ok else 'bright_red'}"
-                f"{' underline' if r.index in live else ''}]{'.' if ok else 'F'}[/]"
-                for r, ok in zip(relevant_reports, passed)
-            ),
+            "".join("[bright_green].[/]" if ok else "[bright_red]F[/]" for ok in passed),
             f"[{'bright_green' if pass_rate == 100 else 'bright_red'}]{pass_rate}%[/]",
         )
 
         sections: list[RenderableType] = [summary]
-        if self.__notebooks:
-            sections += self.__live_status(relevant_reports, live)
         if self.__traced:
             sections.append(
                 Text("Tracing failed tests with snoop, press t to stop.", style="dim")
@@ -387,11 +290,7 @@ class Task:
             )
 
         if failed_reports:
-            # live failures are labelled as such
-            failures = [
-                (f"{r.nodeid} (live)" if r.index in live else r.nodeid, _failure_text(r))
-                for r in failed_reports
-            ]
+            failures = [(r.nodeid, _failure_text(r)) for r in failed_reports]
             traces = [_failure_trace(r) for r in failed_reports]
 
             # one rule + traceback per failure, mirroring pytest's own failure sections
@@ -450,141 +349,9 @@ class Task:
 
         self.__status = Group(*sections)
 
-    def shown_results(self) -> tuple[list[TestResult], set[int]]:
-        """
-        The results the status shows: those of the saved files (``test_results``),
-        where each test's result is replaced by the live one of a notebook's kernel
-        (``live_results``) if that is newer, i.e. if the kernel ran it after the
-        version of the files that ``test_results`` come from was saved. Live results
-        that were skipped (``PrintTest``s, which only run on the saved files) don't
-        replace saved ones, and tests without a live result (e.g. after an interrupted
-        live run) keep theirs.
-
-        Returns
-        -------
-        tuple[list[TestResult], set[int]]
-            The results, and the indices of the tests whose results are live.
-        """
-        with self.__status_lock:
-            live_run = None if self.live_state is None else self.live_state.results
-            saved_time = self.test_results_time
-            if not self.live_results or live_run is None:
-                return self.test_results, set()
-            if saved_time is not None and saved_time >= live_run.time:
-                return self.test_results, set()
-
-            live = _by_test(self.live_results)
-            saved = _by_test(self.test_results)
-            shown = {i for i, r in live.items() if _shown_live(r, saved.get(i))}
-            results: list[TestResult] = []
-            for result in self.test_results:
-                if result.index not in shown:
-                    results.append(result)
-                elif result is saved[result.index][0]:
-                    results += live[result.index]
-            return results, shown
-
-    def __live_status(
-        self, shown: list[TestResult], live: set[int]
-    ) -> list[RenderableType]:
-        """
-        The lines below the result summary of a task with notebooks: where the
-        ``shown`` results (those of the tests' calls) come from, the tests that pass in
-        the notebook's kernel but not in the saved notebook, and whether the task is
-        solved in the kernel, but not yet in the saved notebook. Results of the tests
-        whose indices are in ``live`` are live.
-        """
-        state = self.live_state
-        if state is None:  # the channels haven't been looked at yet
-            return []
-        live_run = state.results
-        lines: list[RenderableType] = []
-        if live:
-            assert live_run is not None
-            source = (
-                f"Live results from {_describe_kernel(state)} "
-                f"({_describe_run(live_run)}). Save the notebook to count your "
-                "progress."
-            )
-        elif state.status is ChannelStatus.TIMED_OUT:
-            source = (
-                "No notebook kernel connected: your notebook kernel stopped "
-                "responding, so results are from your saved notebook."
-            )
-        elif state.status is not ChannelStatus.CONNECTED:
-            source = state.reason or ""
-        elif live_run is None:
-            source = (
-                "Your notebook kernel is connected: run a cell to see live results."
-            )
-        elif not self.live_results and live_run.for_task(self.path) is None:
-            source = (
-                "Your notebook kernel doesn't run this task's tests: results are "
-                "from your saved notebook."
-            )
-        elif self.test_results_time is not None and (
-            self.test_results_time >= live_run.time
-        ):
-            source = (
-                "Results from your saved notebook, which was saved after your last "
-                f"cell run ({_describe_run(live_run)})."
-            )
-        else:
-            source = "Results from your saved notebook."
-        lines.append(Text(source, style="dim"))
-
-        # the usual sign of state the kernel holds, but the saved notebook doesn't
-        live_calls = {r.index: r for r in self.live_results if r.when == "call"}
-        disagreeing = [
-            _test_name(r.nodeid)
-            for r in self.test_results
-            if r.when == "call"
-            and r.outcome == "failed"
-            and r.index is not None
-            and (other := live_calls.get(r.index)) is not None
-            and other.outcome == "passed"
-            and other.nodeid == r.nodeid
-        ]
-        if disagreeing:
-            names = ", ".join(disagreeing[:-1])
-            names = f"{names} and {disagreeing[-1]}" if names else disagreeing[0]
-            lines.append(
-                Text(
-                    f"{names} {'pass' if len(disagreeing) > 1 else 'passes'} in your "
-                    "kernel, but not in the saved notebook: was a cell deleted or not "
-                    "saved?",
-                    style="yellow",
-                )
-            )
-
-        if self.__solved_live(shown, live):
-            lines.append(Text(SOLVED_LIVE, style="bright_green"))
-        return lines
-
-    def __solved_live(self, shown: list[TestResult], live: set[int]) -> bool:
-        """Whether the ``shown`` results of the tests' calls all pass, some of them
-        live (those of the tests whose indices are in ``live``), while the task isn't
-        ``solved`` in the saved files."""
-        return (
-            bool(live)
-            and not self.__solved
-            and bool(shown)
-            and all(r.outcome == "passed" for r in shown)
-        )
-
     @property
     def solved(self) -> bool:
-        """Whether all tests pass on the saved exercise files. Live results don't
-        count, as they may come from code that isn't saved (see ``shown_results``)."""
         return self.__solved
-
-    @property
-    def solved_live(self) -> bool:
-        """Whether all tests pass as shown, with live results (see ``shown_results``),
-        although the task isn't ``solved`` in the saved files yet."""
-        with self.__status_lock:
-            results, live = self.shown_results()
-            return self.__solved_live([r for r in results if r.when == "call"], live)
 
     @property
     def tracing(self) -> bool:
@@ -595,111 +362,9 @@ class Task:
         return self.__tracing
 
     def toggle_tracing(self) -> None:
-        """Turn ``tracing`` on or off, and run the tests again to show the change. The
-        kernels of the task's notebooks trace their next live runs, too (or stop)."""
+        """Turn ``tracing`` on or off, and run the tests again to show the change."""
         self.__tracing = not self.__tracing
-        self.__ask_kernels(self.__open_channels(), tracing=self.__tracing)
         self.run_tests()
-
-    def leave(self) -> None:
-        """
-        Ask the kernels of the task's notebooks to stop tracing, if the task traces (see
-        ``toggle_tracing``), as the TUI leaves the task: for another task, for the
-        course selector, or when it quits. The task itself keeps tracing, and asks the
-        kernels to trace again when it is resumed (see ``resume``).
-        """
-        if self.__tracing and self.__channels is not None:
-            self.__ask_kernels(self.__channels, tracing=False)
-
-    def resume(self) -> None:
-        """Ask the kernels of the task's notebooks to trace again if the task traces,
-        as the TUI returns to it after leaving it (see ``leave``)."""
-        if self.__tracing:
-            self.__ask_kernels(self.__open_channels(), tracing=True)
-
-    def __open_channels(self) -> dict[Path, ChannelReader]:
-        """The channels of the task's notebooks, opened the first time. The kernels
-        don't trace when a task is opened, as its own tests aren't traced either."""
-        if self.__channels is None:
-            self.__channels = {
-                notebook: ChannelReader(notebook) for notebook in self.__notebooks
-            }
-            self.__ask_kernels(self.__channels, tracing=False)
-        return self.__channels
-
-    @staticmethod
-    def __ask_kernels(channels: Mapping[Path, ChannelReader], *, tracing: bool) -> None:
-        """Ask the kernels of the notebooks of ``channels`` to trace their live runs, or
-        not to. Not tracing is only written if they were asked to trace, so that no
-        channel is created for it."""
-        for notebook, reader in channels.items():
-            try:
-                if tracing or reader.read_control().tracing:
-                    reader.write_control(tracing=tracing)
-            except Exception:  # noqa: BLE001
-                get_logger(__name__).warning(
-                    f"Can't ask the kernels of {notebook} "
-                    + ("to trace" if tracing else "not to trace"),
-                    exc_info=True,
-                )
-
-    def check_live_results(self) -> bool:
-        """
-        Look for new live results in the channels of the task's exercise notebooks,
-        which their kernels write when cells run (see ``pyics.notebook.channel``), and
-        show them (see ``shown_results``), or why there are none. Cheap enough to call
-        at every tick: the channel's files are only read when they changed. Does
-        nothing for a task without notebooks.
-
-        Returns
-        -------
-        bool
-            True if the live results, or where they come from, changed
-        """
-        if not self.__notebooks:
-            return False
-        changed = False
-        for notebook, reader in self.__open_channels().items():
-            try:
-                state = reader.poll()
-            except Exception:  # noqa: BLE001
-                # read again at the next tick
-                get_logger(__name__).debug(
-                    f"Can't read the channel of {notebook}", exc_info=True
-                )
-                continue
-            if state is not self.__channel_states.get(notebook):
-                self.__channel_states[notebook] = state
-                changed = True
-        if not changed:
-            return False
-
-        with self.__status_lock:
-            self.live_state, self.live_results = self.__connected()
-            # until the files have been tested, the status says the tests are pending
-            if self.__tested:
-                self.update_status()
-                self.__new_test_results = True
-        return True
-
-    def __connected(self) -> tuple[ChannelState | None, list[TestResult]]:
-        """The channel state to show, and its live results of this task: of the
-        notebooks' connected kernels with results of the task, the one whose results
-        are newest, or else the channel that tells most about why there are none."""
-        newest: tuple[float, ChannelState, list[TestResult]] | None = None
-        for state in self.__channel_states.values():
-            run = state.results
-            if run is None or (results := run.for_task(self.path)) is None:
-                continue
-            if newest is None or run.time > newest[0]:
-                newest = (run.time, state, results)
-        if newest is not None:
-            return newest[1], newest[2]
-        states = sorted(
-            self.__channel_states.values(),
-            key=lambda state: _STATUS_ORDER.index(state.status),
-        )
-        return (states[0] if states else None), []
 
     def check_file_changes(self) -> bool:
         """
@@ -777,19 +442,16 @@ class Task:
                 logger.debug(f"{result.nodeid} {result.when} {result.outcome}")
                 logger.debug(_failure_text(result).plain)
 
-            with self.__status_lock:
-                self.test_results = plugin.results
-                self.test_results_time = saved_at
-                self.__traced = tracing
-                self.__tested = True
-                self.update_status()
-                self.__new_test_results = True
+            self.test_results = plugin.results
+            self.test_results_time = saved_at
+            self.__traced = tracing
+            self.__tested = True
+            self.update_status()
+            self.__new_test_results = True
 
     def __saved_at(self) -> float:
         """When the exercise files were last saved: the latest of their modification
-        times, or now if none can be told. Live results newer than that are shown
-        rather than the results of the tests run on the files (see
-        ``shown_results``)."""
+        times, or now if none can be told (see ``test_results_time``)."""
         times = []
         for f in self.exercise_files:
             try:

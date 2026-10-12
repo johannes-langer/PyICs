@@ -25,7 +25,7 @@ SKIP_DIRS = {
 }
 
 # a plain logger rather than ``get_logger``, which would set up pyics's log file when
-# used in a notebook's kernel (see ``pyics.notebook.extension``)
+# courses are looked for outside the TUI, e.g. by a plugin in a notebook's kernel
 _logger = logging.getLogger(__name__)
 
 
