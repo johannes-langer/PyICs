@@ -201,9 +201,8 @@ def _interruptible() -> Iterator[None]:
     """Let interrupting the kernel raise ``KeyboardInterrupt`` while tests run: ipykernel
     ignores SIGINT outside of its handlers, and cancels a cell with top-level ``await``
     instead. Only the main thread can do so."""
-    if threading.current_thread() is not threading.main_thread() or (
-        (previous := signal.getsignal(signal.SIGINT)) is None
-    ):
+    previous = signal.getsignal(signal.SIGINT)
+    if threading.current_thread() is not threading.main_thread() or previous is None:
         yield
         return
     signal.signal(signal.SIGINT, signal.default_int_handler)
