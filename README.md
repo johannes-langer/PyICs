@@ -183,7 +183,10 @@ Exercise files can be Jupyter notebooks (``.ipynb``) as well as Python files. St
 - Cells tagged ``skip-execution`` don't run in tests, e.g. a long download or training run. Tags are edited in JupyterLab's property inspector, or with _Add Cell Tag_ in VS Code.
 - Output tests (``PrintTest``) compare what all cells output: what they print, and what Jupyter shows as text, i.e. displayed objects, and the value of a cell whose last line is an expression (``Out[n]``), unless it is ``None`` or the line ends with ``;``.
 - Traces (<kbd>t</kbd>) and the messages of structure tests name cells and their lines, e.g. ``bfs.ipynb:cell 3`` or ``cell 3, line 2``.
-- Live results while you run cells, without saving, will come with the optional ``pyics-jupyter`` package.
+
+#### Live Results
+
+With the optional plugin ``pyics-jupyter`` (``pip install "pyics[jupyter]"``, then ``python -m pyics_jupyter install`` and the "Python (pyics)" kernel for the notebook), the tests also run in the notebook's kernel whenever you run a cell, and PyICs shows their results without saving. Progress still only counts the saved notebook. See [its README](plugins/pyics-jupyter/README.md).
 
 #### Sections
 
@@ -211,7 +214,7 @@ Sections link a task to a part of a notebook, e.g. to one exercise of a lecture'
 
 ## Technical Information
 
-This project is managed using ``uv``. If you want to contribute to the project, run ``uv sync`` after cloning the repository at the top level to create a virtual environment with the required packages installed.
+This project is managed using ``uv``. If you want to contribute to the project, run ``uv sync --all-packages`` after cloning the repository at the top level to create a virtual environment with the required packages installed, including the plugins in ``plugins/`` (members of the uv workspace), whose tests ``uv run pytest`` runs, too.
 
 ### Repository/App Structure
 

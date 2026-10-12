@@ -9,7 +9,7 @@ cd examples/search_notebook
 pyics                       # select "Search Algorithms (Notebook)"
 ```
 
-Starting the course creates the notebook ``search_algorithms.ipynb`` next to the course manifest (and the solution in ``.solutions/``). Open it in JupyterLab, Notebook 7 or VS Code, ideally with the PyICs app in the editor's terminal next to it. Saving the notebook reruns the tests of the current task. The app's title shows the notebook's path followed by the task's section, e.g. ``search_algorithms.ipynb › Exercise 1: Depth-First Search``.
+Starting the course creates the notebook ``search_algorithms.ipynb`` next to the course manifest (and the solution in ``.solutions/``). Open it in JupyterLab, Notebook 7 or VS Code, ideally with the PyICs app in the editor's terminal next to it. Saving the notebook reruns the tests of the current task. With the optional plugin [pyics-jupyter](../../plugins/pyics-jupyter/README.md) and its "Python (pyics)" kernel, running a cell shows live results, too. The app's title shows the notebook's path followed by the task's section, e.g. ``search_algorithms.ipynb › Exercise 1: Depth-First Search``.
 
 The notebook is kept outside the usual ``.exercises`` directory, since Jupyter servers don't open files in hidden directories unless they run with ``--ContentsManager.allow_hidden=True``.
 
