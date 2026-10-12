@@ -56,11 +56,12 @@ def same_file(path: StrPath) -> str:
     return os.path.normcase(os.path.realpath(path))
 
 
-def _retry[T](action: Callable[[], T], retry_for: float = RETRY_FOR) -> T:
+def _retry[T](action: Callable[[], T], retry_for: float | None = None) -> T:
     """``action()``, tried again with a short, growing delay while it raises a
-    ``PermissionError``, for at most ``retry_for`` seconds: on Windows, a file can't be
-    replaced while another process has it open, nor opened while it is replaced."""
-    deadline = time.monotonic() + retry_for
+    ``PermissionError``, for at most ``retry_for`` seconds (``RETRY_FOR`` by default):
+    on Windows, a file can't be replaced while another process has it open, nor opened
+    while it is replaced."""
+    deadline = time.monotonic() + (RETRY_FOR if retry_for is None else retry_for)
     delay = 0.001
     while True:
         try:
@@ -93,9 +94,9 @@ def write_json(path: Path, data: Any) -> None:
         raise
 
 
-def read_json(path: Path, retry_for: float = RETRY_FOR) -> Any | None:
-    """The JSON in ``path``, or None if it doesn't exist, can't be read (for
-    ``retry_for`` seconds) or isn't JSON."""
+def read_json(path: Path, retry_for: float | None = None) -> Any | None:
+    """The JSON in ``path``, or None if it doesn't exist, can't be read (see
+    ``_retry``) or isn't JSON."""
     try:
         return json.loads(_retry(path.read_bytes, retry_for))
     except OSError, ValueError:
