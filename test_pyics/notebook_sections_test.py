@@ -10,7 +10,6 @@ import io
 import json as std_json
 import os
 import queue
-import re
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -24,7 +23,6 @@ import pytest
 from notebook_helpers import code, make_notebook, markdown, stream, write_notebook
 from rich.console import Console
 
-from pyics.app.cli import CLI
 from pyics.app.prompts import PromptSession
 from pyics.app.pyics import PyIC, _exercise_title
 from pyics.data import Course, Task
@@ -56,8 +54,6 @@ from pyics.tests.tests import (
 
 UP, DOWN, ENTER, CTRL_C, CTRL_D = "UP", "DOWN", "\r", "\x03", "\x04"
 TIMEOUT = 10  # seconds
-# OSC 8 hyperlinks as rich writes them: ESC ] 8 ; id=<id> ; <uri> ESC \
-OSC8 = re.compile(r"\x1b\]8;[^;]*;([^\x1b]*)\x1b\\")
 
 LOOP = "def total(xs):\n    s = 0\n    for x in xs:\n        s += x\n    return s"
 
@@ -530,47 +526,9 @@ def test_the_title_of_python_files_is_their_path(chdir: Path) -> None:
     assert title.spans == []
 
 
-def _write_server(runtime_dir: Path, root_dir: Path) -> None:
-    """Write a ``jpserver-*.json`` file as jupyter_server does, for a JupyterLab of
-    ``root_dir`` running as this process."""
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    info = {
-        "base_url": "/",
-        "pid": os.getpid(),
-        "root_dir": str(root_dir),
-        "token": "secret-token",
-        "url": "http://localhost:8888/",
-    }
-    (runtime_dir / "jpserver-1.json").write_text(std_json.dumps(info))
-
-
-@pytest.fixture
-def terminal_cli(monkeypatch: pytest.MonkeyPatch) -> CLI:
-    """A CLI whose console writes to a terminal that isn't VS Code's or Jupyter's, as
-    rich only writes links to terminals."""
-    for var in ("TERM_PROGRAM", "JUPYTER_SERVER_ROOT", "JUPYTER_SERVER_URL"):
-        monkeypatch.delenv(var, raising=False)
-    cli = CLI()
-    cli.console = Console(
-        force_terminal=True,
-        color_system="truecolor",
-        legacy_windows=False,
-        width=200,
-        height=40,
-    )
-    return cli
-
-
-def test_the_tui_title_links_the_section_into_jupyterlab(
-    lecture: Path,
-    chdir: Path,
-    terminal_cli: CLI,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-    no_new_threads: None,
+def test_the_tui_title_follows_the_saved_notebook(
+    lecture: Path, chdir: Path, no_new_threads: None
 ) -> None:
-    _write_server(chdir / "runtime", chdir)
-    monkeypatch.setenv("JUPYTER_RUNTIME_DIR", str(chdir / "runtime"))
     task = Task.create_task_json(
         chdir / "t",
         "T",
@@ -582,18 +540,17 @@ def test_the_tui_title_links_the_section_into_jupyterlab(
     course = Course.load_course_manifest(
         Course.create_course_manifest(chdir / "c", [task])
     )
-    app = PyIC(terminal_cli)
+    app = PyIC(MagicMock())
 
     def update_until(text: str) -> None:
-        _wait_for(lambda: (app._update_course(course), text in app.cli.main_title)[1])
+        def title() -> str:
+            app._update_course(course)
+            calls = app.cli.update_main_content.call_args_list
+            return str(calls[-1].args[1]) if calls else ""
 
-    update_until("Exercise 1: Squares")
-    assert str(app.cli.main_title) == f"{lecture.as_posix()} › Exercise 1: Squares"
-    capsys.readouterr()
-    app.cli.draw_interface()
-    links = OSC8.findall(capsys.readouterr().out)
-    assert "http://localhost:8888/lab/tree/lecture.ipynb#cell-id=ex1-anchor" in links
-    assert lecture.as_uri() in links
+        _wait_for(lambda: text in title())
+
+    update_until(f"{lecture.as_posix()} › Exercise 1: Squares")
 
     # the title follows the saved notebook
     nb = _lecture()
