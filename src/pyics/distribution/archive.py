@@ -22,8 +22,13 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import Any
 
-from pyics.distribution.dependencies import ModulePolicy, manifest_requirements
+from pyics.distribution.dependencies import (
+    ModulePolicy,
+    manifest_requirements,
+    pip_install_lines,
+)
 from pyics.distribution.slugs import check_slug, slugify
+from pyics.notebook import cells
 from pyics.util import json_handling as json
 from pyics.util import paths
 from pyics.util.discovery import COURSE_SUFFIX, SKIP_DIRS, TASK_SUFFIX, find_files
@@ -196,6 +201,82 @@ def read_course(manifest_path: Path) -> CourseFiles:
         course.solution_files.update(map(paths.absolute, solutions))
         course.referenced.update(map(paths.absolute, referenced))
     return course
+
+
+def differing_notebooks(
+    tasks: Mapping[Path, Mapping[str, Any]],
+) -> dict[Path, list[Path]]:
+    """
+    The exercise notebooks that several of the ``tasks`` share, but store different
+    contents for (compared normalized, see ``cells.normalize``). The first of them to
+    be set up creates the notebook, so which contents students get depends on the task
+    they start first.
+
+    Parameters
+    ----------
+    tasks: Mapping[Path, Mapping[str, Any]]
+        Task files by absolute path, mapped to their data as read by
+        ``json_handling.loads_plain``. Those whose exercise files can't be read are
+        left out.
+
+    Returns
+    -------
+    dict[Path, list[Path]]
+        The notebooks' absolute paths, mapped to the task files that share them.
+    """
+    stored: dict[Path, dict[Path, str]] = {}
+    for task_file, data in tasks.items():
+        try:
+            exercises, _, _ = _task_files_paths(data, task_file.parent)
+        except ArchiveError:
+            continue
+        codes = data.get("exercise_code")
+        for path, text in zip(exercises, codes if isinstance(codes, list) else []):
+            if cells.is_notebook(path) and isinstance(text, str):
+                try:
+                    text = cells.normalize(text)
+                except cells.NotebookError:
+                    pass  # compared as it is
+                stored.setdefault(paths.absolute(path), {})[task_file] = text
+    return {
+        notebook: list(contents)
+        for notebook, contents in stored.items()
+        if len(set(contents.values())) > 1
+    }
+
+
+def pip_installs(
+    tasks: Mapping[Path, Mapping[str, Any]],
+) -> list[tuple[Path, int, str]]:
+    """
+    The lines that install packages (see ``dependencies.pip_install_lines``) in the
+    exercise and solution notebooks the ``tasks`` store, once each, e.g. those of a
+    notebook that several tasks share.
+
+    Parameters
+    ----------
+    tasks: Mapping[Path, Mapping[str, Any]]
+        Task files by absolute path, mapped to their data as read by
+        ``json_handling.loads_plain``.
+
+    Returns
+    -------
+    list[tuple[Path, int, str]]
+        The notebook's absolute path, the number of the line's cell, and the line.
+    """
+    found: dict[tuple[Path, int, str], None] = {}  # ordered set
+    for task_file, data in tasks.items():
+        try:
+            exercises, solutions, _ = _task_files_paths(data, task_file.parent)
+        except ArchiveError:
+            continue
+        for files, key in ((exercises, "exercise_code"), (solutions, "solution_code")):
+            codes = data.get(key)
+            for path, text in zip(files, codes if isinstance(codes, list) else []):
+                if cells.is_notebook(path) and isinstance(text, str):
+                    for number, line in pip_install_lines(text):
+                        found[(paths.absolute(path), number, line)] = None
+    return list(found)
 
 
 def _included_files(

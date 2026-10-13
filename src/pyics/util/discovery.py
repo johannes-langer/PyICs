@@ -2,6 +2,7 @@
 Find task files and course manifests below a directory.
 """
 
+import logging
 import os
 from collections.abc import Iterator
 from pathlib import Path, PurePath
@@ -9,7 +10,6 @@ from typing import Any
 
 from pyics.util import json_handling as json
 from pyics.util import paths
-from pyics.util.logging import get_logger
 
 TASK_SUFFIX = ".pyicstask.json"
 COURSE_SUFFIX = ".pyicscourse.json"
@@ -23,6 +23,10 @@ SKIP_DIRS = {
     ".pytest_cache",
     ".ruff_cache",
 }
+
+# a plain logger rather than ``get_logger``, which would set up pyics's log file when
+# courses are looked for outside the TUI, e.g. by a plugin in a notebook's kernel
+_logger = logging.getLogger(__name__)
 
 
 def find_files(root: Path, max_depth: int, suffix: str) -> Iterator[Path]:
@@ -54,7 +58,7 @@ def find_task_files(root: Path, max_depth: int) -> dict[Path, str]:
         try:
             name = json.load_plain(root / rel)["name"]
         except Exception:  # noqa: BLE001
-            get_logger(__name__).debug(f"Skipping {root / rel}", exc_info=True)
+            _logger.debug(f"Skipping {root / rel}", exc_info=True)
             continue
         if isinstance(name, str):
             found[rel] = name
@@ -79,7 +83,7 @@ def find_courses(root: Path, max_depth: int) -> dict[Path, dict[str, Any]]:
             manifest = json.load_plain(path)
             tasks = manifest["tasks"]
         except Exception:  # noqa: BLE001
-            get_logger(__name__).debug(f"Skipping {path}", exc_info=True)
+            _logger.debug(f"Skipping {path}", exc_info=True)
             continue
         if isinstance(tasks, dict) and all(
             isinstance(v, (str, PurePath)) for v in tasks.values()

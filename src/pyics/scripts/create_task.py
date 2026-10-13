@@ -3,6 +3,7 @@ import copy
 import difflib
 import inspect
 import reprlib
+import sys
 from collections.abc import Collection, Mapping
 from os import PathLike
 from pathlib import Path, PurePath
@@ -26,8 +27,17 @@ from pyics.app.prompts import (
     TextInput,
 )
 from pyics.data.task import Task
+from pyics.notebook import cells, loader, sections
+from pyics.notebook.sections import Section
 from pyics.tests import Test, check_specs, check_structure
-from pyics.tests.tests import PrintTest, SimpleTest, SpecTest, StructureTest
+from pyics.tests.tests import (
+    INHERIT,
+    Inherit,
+    PrintTest,
+    SimpleTest,
+    SpecTest,
+    StructureTest,
+)
 from pyics.util import paths
 from pyics.util.terminal import fullscreen
 
@@ -62,6 +72,12 @@ _MAX_DIFF_LINES = 30
 # name of the variable that holds a parameter's current value when editing a test, if
 # its repr can't be used to prefill the input
 _CURRENT = "current"
+# the options for the section of a task, and of a test, that isn't one of the
+# notebook's sections
+_NO_SECTION = "No section (whole notebook)"
+_WHOLE_NOTEBOOK = "Whole notebook"
+# the module a notebook with test information runs as (see ``_load_namespace``)
+_INFO_MODULE = "pyics_test_information"
 
 
 def _confirm(s: PromptSession, label: str, *, default: bool = True) -> bool:
@@ -124,9 +140,34 @@ def _read(path: PathLike) -> str | None:
         return None
 
 
-def _diff(stored: str, on_disk: str) -> RenderableType:
+def _as_stored(path: PathLike, text: str | None) -> str | None:
+    """``text``, the contents of the file at ``path``, as a task file stores them:
+    normalized for a notebook (see ``cells.normalize``), so that e.g. its outputs don't
+    count as changes. As it is if it can't be read as a notebook."""
+    if text is None or not cells.is_notebook(path):
+        return text
+    try:
+        return cells.normalize(text)
+    except cells.NotebookError:
+        return text
+
+
+def _diff(stored: str, on_disk: str, path: PathLike | None = None) -> RenderableType:
     """How a file ``on_disk`` differs from its ``stored`` contents, as a unified diff of
-    at most ``_MAX_DIFF_LINES`` lines."""
+    at most ``_MAX_DIFF_LINES`` lines. A notebook (by its ``path``) is compared by the
+    text of its cells (see ``cells.as_cell_text``) rather than as JSON."""
+    if path is not None and cells.is_notebook(path):
+        try:
+            stored, on_disk = cells.as_cell_text(stored), cells.as_cell_text(on_disk)
+        except cells.NotebookError:
+            pass  # compared as it is
+        else:
+            if stored == on_disk:
+                return Text(
+                    "Only its metadata differs (e.g. the tags of cells), not the text "
+                    "of its cells.",
+                    style="dim",
+                )
     lines = list(
         difflib.unified_diff(
             stored.splitlines(), on_disk.splitlines(), "stored", "on disk", lineterm=""
@@ -137,6 +178,138 @@ def _diff(stored: str, on_disk: str) -> RenderableType:
         return shown
     more = Text(f"... {len(lines) - _MAX_DIFF_LINES} more lines", style="dim")
     return Group(shown, more)
+
+
+def _notebook_sections(path: Path, contents: Mapping[Path, str]) -> dict[str, Section]:
+    """The sections of the notebook at ``path`` as the task file will store it: the
+    ``contents`` kept for it (by absolute path), if any, else the file on disk. None if
+    it can't be read."""
+    key = paths.absolute(path)
+    text = contents[key] if key in contents else _read(path)
+    if text is None:
+        return {}
+    try:
+        return sections.find_sections(cells.parse(text))
+    except cells.NotebookError:
+        return {}
+
+
+def _section_options(
+    found: Mapping[str, Section], current: str | None
+) -> tuple[dict[str, str], dict[str, str]]:
+    """
+    The sections ``found`` in a notebook as options to choose from, and the
+    ``current`` section too if the notebook doesn't have it.
+
+    Returns
+    -------
+    tuple[dict[str, str], dict[str, str]]
+        The section names by option, and hints by option.
+    """
+    options: dict[str, str] = {}
+    hints: dict[str, str] = {}
+    for name, section in found.items():
+        label = name if section.title == name else f"{name} ({section.title})"
+        first, last = section.cells[0].number, section.cells[-1].number
+        where = f"Cell {first}" if first == last else f"Cells {first} to {last}"
+        options[label] = name
+        hints[label] = f"{where} of the notebook."
+    if current is not None and current not in found:
+        label = f"{current} (not found in the notebook)"
+        options[label] = current
+        hints[label] = (
+            "The notebook has no section of this name: its tests fail until a cell "
+            f"starts it again, tagged '{sections.TAG_PREFIX}{current}'."
+        )
+    return options, hints
+
+
+def _prompt_sections(
+    s: PromptSession,
+    ex_files: list[Path],
+    contents: Mapping[Path, str],
+    current: Mapping[Path, str],
+) -> dict[Path, str]:
+    """
+    Ask which section of each of the exercise notebooks ``ex_files`` the task is about
+    (see ``pyics.notebook.sections``), prefilled with its ``current`` section (by
+    absolute path) when editing a task. Not asked for a notebook without sections,
+    unless the task has one for it. Sections are looked up in the ``contents`` kept for
+    a notebook (by path), else in the file on disk.
+
+    Returns
+    -------
+    dict[Path, str]
+        The section of each notebook that has one, by its path in ``ex_files``.
+    """
+    kept = {paths.absolute(path): text for path, text in contents.items()}
+    chosen: dict[Path, str] = {}
+    for path in ex_files:
+        if not cells.is_notebook(path):
+            continue
+        found = _notebook_sections(path, kept)
+        section = current.get(paths.absolute(path))
+        if not found and section is None:
+            continue
+        options, hints = _section_options(found, section)
+        hints[_NO_SECTION] = (
+            "Its tests check the whole notebook, unless they have a section of their "
+            "own."
+        )
+        prompt = SelectInput(
+            f"Section of the task in {escape(str(path))}",
+            [_NO_SECTION, *options],
+            hints=hints,
+        )
+        prompt.set_answer(next((o for o, n in options.items() if n == section), ""))
+        choice = s.ask(prompt)
+        if choice != _NO_SECTION:
+            chosen[path] = options[choice]
+    return chosen
+
+
+def _prompt_test_section(
+    s: PromptSession,
+    path: Path,
+    task_section: str | None,
+    found: Mapping[str, Section],
+    current: str | None | Inherit,
+) -> str | None | Inherit:
+    """
+    Ask for the section of the notebook at ``path`` a test is about: its task's section
+    ``task_section`` (``INHERIT``, so it follows the task's section), the whole
+    notebook (None), or another of the sections ``found`` in it. Prefilled with the
+    test's ``current`` section. Not asked if the notebook has no sections, and neither
+    the task nor the test has one: the test then inherits its task's section.
+    """
+    if not found and task_section is None and current is INHERIT:
+        return INHERIT
+    task_option = f"The task's section ({task_section or 'none: whole notebook'})"
+    choices: dict[str, str | None | Inherit] = {
+        task_option: INHERIT,
+        _WHOLE_NOTEBOOK: None,
+    }
+    hints = {
+        task_option: "The test checks the section the task is about, also once that "
+        "is changed.",
+        _WHOLE_NOTEBOOK: "The test checks the whole notebook, whichever section the "
+        "task is about.",
+    }
+    # the task's own section is offered as such, unless the test has it already
+    others = {
+        name: section
+        for name, section in found.items()
+        if name != task_section or name == current
+    }
+    options, section_hints = _section_options(
+        others, current if isinstance(current, str) else None
+    )
+    choices.update(options)
+    hints.update(section_hints)
+
+    prompt = SelectInput("section", list(choices), hints=hints)
+    prompt.set_answer(next((o for o, c in choices.items() if c == current), ""))
+    return choices[s.ask(prompt)]
 
 
 def _edit_files(
@@ -160,7 +333,8 @@ def _edit_files(
     moved: dict[Path, Path | None] = {}
 
     for i, path in enumerate(current):
-        in_task, on_disk = stored.get(path), _read(path)
+        in_task = _as_stored(path, stored.get(path))
+        on_disk = _as_stored(path, _read(path))
 
         options, hints, details = [], {}, None
         if in_task is not None:
@@ -178,7 +352,7 @@ def _edit_files(
             if in_task is not None:
                 details = Group(
                     Text("The file on disk differs from the stored contents:"),
-                    _diff(in_task, on_disk),
+                    _diff(in_task, on_disk, path),
                 )
         if in_task is None and on_disk is None:
             details = Text(
@@ -216,18 +390,46 @@ def _edit_files(
     return _prompt_files(s, kind, kept), contents, moved
 
 
-def _load_namespace(raw: str) -> dict[str, Any]:
-    """Execute the Python file at ``raw`` and return the variables it defines (excluding
-    dunders and modules)."""
+def _load_namespace(raw: str) -> tuple[dict[str, Any], str]:
+    """
+    Execute the Python file at ``raw``, or run the code cells of the notebook at it (see
+    ``loader.run_notebook``), and return the variables it defines (excluding dunders and
+    modules, and a notebook's stand-ins for ``get_ipython`` and ``display``).
+
+    Returns
+    -------
+    tuple[dict[str, Any], str]
+        The variables, and the errors of the notebook's cells as a problem to show (see
+        ``_prompt_param``), or an empty string. An error in a cell doesn't stop the
+        notebook's run, but the variables it would have defined are missing.
+    """
     path = _check_file(raw)
-    namespace: dict[str, Any] = {}
-    source = path.read_text(encoding="utf-8")
-    exec(compile(source, str(path), "exec"), namespace)  # noqa: S102
+    problem = ""
+    if cells.is_notebook(path):
+        previous = sys.modules.get(_INFO_MODULE)
+        try:
+            run = loader.run_notebook(path, module_name=_INFO_MODULE)
+        finally:
+            if previous is None:
+                sys.modules.pop(_INFO_MODULE, None)
+            else:
+                sys.modules[_INFO_MODULE] = previous
+        namespace = vars(run.module)
+        if run.errors:
+            more = f" (and {len(run.errors) - 1} more)" if len(run.errors) > 1 else ""
+            problem = f"In the test information file, {run.errors[0].describe()}{more}"
+    else:
+        namespace = {}
+        source = path.read_text(encoding="utf-8")
+        exec(compile(source, str(path), "exec"), namespace)  # noqa: S102
     return {
         k: v
         for k, v in namespace.items()
-        if not k.startswith("__") and not isinstance(v, ModuleType)
-    }
+        if not k.startswith("__")
+        and not isinstance(v, ModuleType)
+        # the loader's stand-ins, rather than what the notebook imports or defines
+        and getattr(v, "__module__", None) != loader.__name__
+    }, problem
 
 
 def _check(test_cls: type[Test], param: inspect.Parameter, value: Any) -> Any:
@@ -325,19 +527,34 @@ def _prompt_test(
     test_cls: type[Test],
     ex_files: list[Path],
     current: Test | None = None,
+    *,
+    task_sections: Mapping[Path, str] | None = None,
+    contents: Mapping[Path, str] | None = None,
 ) -> Test:
     """
     Interactively define a test of type ``test_cls``, by asking for each parameter of its
     constructor. When editing the test ``current``, each one is prefilled with its
     current value.
 
-    The user may reference a Python file first: its variables whose names match a
-    parameter are used for it directly, and all of them are in scope for the expressions
-    entered for the other parameters. ``file_path`` is always one of ``ex_files``.
+    The user may reference a Python file or a notebook first: its variables whose names
+    match a parameter are used for it directly, and all of them are in scope for the
+    expressions entered for the other parameters. If cells of the notebook raised an
+    error, the prompts for the other parameters say so. ``file_path`` is always one of
+    ``ex_files``.
+
+    A test of a notebook can be about a ``section`` of it (see ``_prompt_test_section``):
+    by default the task's, i.e. its section in ``task_sections`` (by path). Sections are
+    looked up in the ``contents`` kept for the notebook (by path), else in the file on
+    disk.
     """
+    task_sections = {paths.absolute(p): n for p, n in (task_sections or {}).items()}
+    kept = {paths.absolute(p): text for p, text in (contents or {}).items()}
     symbols: dict[str, Any] = {}
+    info_problem = ""
     if _confirm(s, "Reference a file with test information?", default=current is None):
-        symbols = s.ask(PathInput("Test information file"), _load_namespace)
+        symbols, info_problem = s.ask(
+            PathInput("Test information file"), _load_namespace
+        )
 
     kwargs: dict[str, Any] = {}
     for param in inspect.signature(test_cls).parameters.values():
@@ -353,7 +570,23 @@ def _prompt_test(
             kwargs[param.name] = Path(s.ask(prompt)).absolute()
             continue
 
-        problem = ""
+        if param.name == "section":
+            # a test that isn't given one inherits its task's, storing nothing
+            path = kwargs["file_path"]
+            if cells.is_notebook(path):
+                current_section = INHERIT if value is param.empty else value
+                section = _prompt_test_section(
+                    s,
+                    path,
+                    task_sections.get(paths.absolute(path)),
+                    _notebook_sections(path, kept),
+                    current_section,
+                )
+                if section is not INHERIT:
+                    kwargs[param.name] = section
+            continue
+
+        problem = info_problem
         if param.name in symbols:
             try:
                 kwargs[param.name] = _check(test_cls, param, symbols[param.name])
@@ -371,7 +604,7 @@ def _describe_test(test: Test, problem: str = "") -> RenderableType:
     lines.append(Text(type(test).__name__, style="dim"))
     for param in inspect.signature(type(test)).parameters.values():
         value = getattr(test, param.name, param.empty)
-        if value is param.empty:
+        if value is param.empty or value is INHERIT:
             continue
         text = str(value) if isinstance(value, PurePath) else reprlib.repr(value)
         lines.append(Text(f"  {param.name} = {text}", style="dim"))
@@ -379,13 +612,18 @@ def _describe_test(test: Test, problem: str = "") -> RenderableType:
 
 
 def _prompt_tests(
-    s: PromptSession, ex_files: list[Path], current: list[Test] | None = None
+    s: PromptSession,
+    ex_files: list[Path],
+    current: list[Test] | None = None,
+    *,
+    task_sections: Mapping[Path, str] | None = None,
+    contents: Mapping[Path, str] | None = None,
 ) -> list[Test]:
     """
     Interactively define any number of tests, choosing the test type for each. When
     editing a task, its ``current`` tests are kept, edited or removed first, and adding
     more is not preselected. A test whose file isn't one of ``ex_files`` can't be kept
-    as it is.
+    as it is. ``task_sections`` and ``contents`` are passed on to ``_prompt_test``.
     """
     tests: list[Test] = []
     ex = {paths.absolute(f) for f in ex_files}
@@ -403,7 +641,16 @@ def _prompt_tests(
         if choice == _KEEP:
             tests.append(test)
         elif choice == _EDIT:
-            tests.append(_prompt_test(s, type(test), ex_files, current=test))
+            tests.append(
+                _prompt_test(
+                    s,
+                    type(test),
+                    ex_files,
+                    current=test,
+                    task_sections=task_sections,
+                    contents=contents,
+                )
+            )
 
     test_types = {cls.__name__: cls for cls in _TEST_TYPES}
     hints = {
@@ -422,7 +669,15 @@ def _prompt_tests(
         kind = s.ask(prompt)
         if kind == _NO_MORE_TESTS:
             return tests
-        tests.append(_prompt_test(s, test_types[kind], ex_files))
+        tests.append(
+            _prompt_test(
+                s,
+                test_types[kind],
+                ex_files,
+                task_sections=task_sections,
+                contents=contents,
+            )
+        )
 
 
 def _repoint(test: Test, moved: Mapping[Path, Path | None]) -> Test:
@@ -494,7 +749,7 @@ def _task_flow(
     task is edited instead: every prompt is prefilled with its current value, so that
     confirming all of them leaves the task as it was. Changes to its exercise files
     carry over to its tests: those of a replaced file test the new file, and those of a
-    removed file need to be edited or removed.
+    removed file need to be edited or removed. The same goes for the task's sections.
 
     Returns
     -------
@@ -525,6 +780,13 @@ def _task_flow(
             s, "exercise", current["ex_files"], current["file_contents"]
         )
         file_contents.update(ex_contents)
+    # those of replaced notebooks are offered for the new notebook
+    current_sections: dict[Path, str] = {}
+    for path, section in (current or {}).get("sections", {}).items():
+        new_path = moved.get(paths.absolute(path), path)
+        if new_path is not None:
+            current_sections[paths.absolute(new_path)] = section
+    task_sections = _prompt_sections(s, ex_files, file_contents, current_sections)
 
     s.cli.update_progress(4 / _TOTAL_STEPS)
     if current is None:
@@ -536,11 +798,16 @@ def _task_flow(
         file_contents.update(sol_contents)
 
     s.cli.update_progress(5 / _TOTAL_STEPS)
-    if current is None:
-        tests = _prompt_tests(s, ex_files)
-    else:
+    current_tests = None
+    if current is not None:
         current_tests = [_repoint(test, moved) for test in current["tests"]]
-        tests = _prompt_tests(s, ex_files, current_tests)
+    tests = _prompt_tests(
+        s,
+        ex_files,
+        current_tests,
+        task_sections=task_sections,
+        contents=file_contents,
+    )
 
     s.cli.update_progress(6 / _TOTAL_STEPS)
     return {
@@ -551,6 +818,7 @@ def _task_flow(
         "tests": tests or None,
         "file_contents": file_contents,
         "help": hints,
+        "sections": task_sections,
     }
 
 

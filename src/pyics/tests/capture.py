@@ -7,7 +7,8 @@ from contextlib import contextmanager
 
 
 class _ThreadLocalStdout:
-    """`sys.stdout` replacement that only redirects the calling thread's writes."""
+    """`sys.stdout` (or `sys.stderr`) replacement that only redirects the calling thread's
+    writes."""
 
     def __init__(self, real):
         self._real = real
@@ -31,17 +32,30 @@ class _ThreadLocalStdout:
 _install_lock = threading.Lock()
 
 
-def _ensure_installed() -> _ThreadLocalStdout:
+def _ensure_installed(stream: str = "stdout") -> _ThreadLocalStdout:
     with _install_lock:
-        if not isinstance(sys.stdout, _ThreadLocalStdout):
-            sys.stdout = _ThreadLocalStdout(sys.stdout)
-        return sys.stdout
+        if not isinstance(getattr(sys, stream), _ThreadLocalStdout):
+            setattr(sys, stream, _ThreadLocalStdout(getattr(sys, stream)))
+        return getattr(sys, stream)
 
 
 @contextmanager
 def capture_stdout() -> Generator[io.StringIO]:
     """Capture this thread's stdout writes only; other threads are unaffected."""
-    proxy = _ensure_installed()
+    with _capture("stdout") as buf:
+        yield buf
+
+
+@contextmanager
+def capture_stderr() -> Generator[io.StringIO]:
+    """Capture this thread's stderr writes only; other threads are unaffected."""
+    with _capture("stderr") as buf:
+        yield buf
+
+
+@contextmanager
+def _capture(stream: str) -> Generator[io.StringIO]:
+    proxy = _ensure_installed(stream)
     buf = io.StringIO()
     stack = proxy._stack()
     stack.append(buf)

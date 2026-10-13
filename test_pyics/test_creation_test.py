@@ -2,17 +2,23 @@
 Drive the interactive test-creation flow of ``create_task`` with scripted key presses.
 """
 
+import io
 import queue
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from notebook_helpers import markdown, write_notebook
+from rich.console import Console
 
 from pyics.app.prompts import PromptCancelled, PromptSession
 from pyics.scripts.create_task import (
+    _INFO_MODULE,
     _TEST_TYPES,
     _check_file,
+    _load_namespace,
     _prompt_files,
     _prompt_test,
     _prompt_tests,
@@ -347,4 +353,64 @@ def test_malformed_structure_rules_are_asked_again(ex_files: list[Path]) -> None
     )  # fmt: skip
     assert isinstance(test, StructureTest)
     assert test.rules == [{"concept": "loop", "max": 0}]
-    
+
+
+# --- notebooks as test information files ---
+
+SOLUTION_NOTEBOOK = [
+    markdown("# Depth-first search"),
+    "%matplotlib inline\nimport math",
+    SOLUTION_FILE,
+    'print("not shown")\nexpected = depth_first_search',
+    "unfinished",  # cell 5 raises a NameError
+    "display(math.pi)\nexpected",
+]
+CELL_5_RAISED = (
+    "In the test information file, cell 5 raised NameError: name 'unfinished' is not "
+    "defined"
+)
+
+
+def test_notebooks_are_run_for_their_variables(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    info = write_notebook(tmp_path / "solution.ipynb", SOLUTION_NOTEBOOK)
+    symbols, problem = _load_namespace(str(info))
+    # neither modules, nor the stand-ins of the notebook's get_ipython() and display()
+    assert set(symbols) == {"depth_first_search", "symbol_name", "expected"}
+    assert symbols["expected"] is symbols["depth_first_search"]
+    assert problem == CELL_5_RAISED
+    assert capsys.readouterr().out == ""
+    assert _INFO_MODULE not in sys.modules
+
+    py = tmp_path / "solution.py"
+    py.write_text(SOLUTION_FILE)
+    symbols, problem = _load_namespace(str(py))
+    assert set(symbols) == {"depth_first_search", "symbol_name"}
+    assert problem == ""
+
+
+def test_spec_from_a_solution_notebook(tmp_path: Path, ex_files: list[Path]) -> None:
+    info = write_notebook(tmp_path / "solution.ipynb", SOLUTION_NOTEBOOK)
+    q: queue.Queue[str] = queue.Queue()
+    keys = [
+        ENTER, *_type(str(info)),  # reference the solution notebook
+        DOWN, ENTER, *_type("t"),  # name: enter text
+        ENTER,  # file_path; symbol_name, expected: exact matches
+        ENTER,  # by_type: keep False
+    ]  # fmt: skip
+    for key in [*keys, "\x03"]:
+        q.put(key)
+    cli = MagicMock()
+    test = PromptSession(cli, q).run(lambda s: _prompt_test(s, SpecTest, ex_files))
+    assert q.get_nowait() == "\x03", "all keys were used"
+    assert isinstance(test, SpecTest)
+    assert (test.name, test.symbol_name) == ("t", "depth_first_search")
+    assert test.expected == SOLUTION_SPEC
+
+    # the prompts for what the notebook doesn't define say that a cell raised
+    calls = cli.update_main_content.call_args_list
+    by_type = next(c.args[0] for c in reversed(calls) if c.kwargs["title"] == "by_type")
+    console = Console(width=200, record=True, file=io.StringIO())
+    console.print(by_type)
+    assert CELL_5_RAISED in console.export_text()

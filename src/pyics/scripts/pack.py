@@ -6,7 +6,7 @@ from pyics.distribution import archive, dependencies
 from pyics.distribution.archive import ArchiveError
 from pyics.distribution.slugs import check_slug
 from pyics.distribution.sources import SourceError, build_index
-from pyics.scripts.console import confirm, fail
+from pyics.scripts.console import confirm, fail, warn_differing_notebooks
 from pyics.util import paths
 
 
@@ -22,7 +22,8 @@ def _declare_requirements(
 ) -> list[str] | None:
     """
     Find the packages ``course`` uses that its ``requires`` don't declare, and offer to
-    add them (or add them if ``yes``).
+    add them (or add them if ``yes``). The lines of its notebooks that install packages
+    are shown as hints (see ``archive.pip_installs``).
 
     Returns
     -------
@@ -43,6 +44,11 @@ def _declare_requirements(
         installed = dependencies.installed_version(distribution)
         note = "" if installed else ", not installed here"
         print(f"  {distribution} (in {', '.join(sorted(files))}{note})")
+    if installs := archive.pip_installs(course.tasks):
+        print("Its notebooks install packages with:")
+        for notebook, cell, line in installs:
+            where = paths.relative_to(notebook, base).as_posix()
+            print(f"  {where} (cell {cell}): {line}")
     if yes or confirm("Add them to its requires?", default=True):
         return [*requires, *sorted(missing)]
     print("Students will have to find out themselves which packages to install.")
@@ -68,7 +74,9 @@ def _pack(
 
     The given version, description, slug and tags are stored in the manifest, so the
     next pack reuses them. So are the packages the course uses that its requires don't
-    declare yet, once confirmed.
+    declare yet, once confirmed (with the ``%pip install`` lines of its notebooks as
+    hints). Tasks that share a notebook, but store different contents for it, are
+    warned about.
 
     Parameters
     ----------
@@ -97,6 +105,9 @@ def _pack(
     """
     try:
         course = archive.read_course(Path(manifest))
+        warn_differing_notebooks(
+            archive.differing_notebooks(course.tasks), course.manifest_path.parent
+        )
         info = course.info
         changes: dict[str, Any] = {}
         if version is not None:

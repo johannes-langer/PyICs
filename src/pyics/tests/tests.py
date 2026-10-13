@@ -1,19 +1,69 @@
 import copy
+import enum
 import importlib.util as iutil
 import sys
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from contextvars import ContextVar
 from importlib.machinery import ModuleSpec
 from pathlib import Path
-from types import ModuleType
-from typing import Any, ClassVar, Protocol, Self
+from types import MappingProxyType, ModuleType
+from typing import Any, ClassVar, Literal, Protocol, Self
 
+import pytest
 from _pytest.assertion.util import assertrepr_compare, dummy_highlighter
+from rich.markup import escape
 
 import pyics.util.json_handling as json
+from pyics.notebook import cells, loader, sections
 from pyics.tests.capture import capture_stdout, provide_input
 from pyics.tests.trace import Trace
+from pyics.util import paths
 from pyics.util.paths import StrPath
 from . import check_specs, check_structure, compare
+
+
+class _Inherit(enum.Enum):
+    INHERIT = "inherit"
+
+
+# the section of a test that wasn't given one (see ``PrintTest`` and ``StructureTest``):
+# it inherits its task's section for its file (see ``TASK_SECTIONS``)
+INHERIT = _Inherit.INHERIT
+type Inherit = Literal[_Inherit.INHERIT]
+
+# The section of each exercise notebook that the task whose tests are running is about
+# (see ``Task.sections``), by the notebook's absolute path. Set while a test runs (see
+# ``PyicsItem.runtest``), so that tests that weren't given a section of their own
+# inherit their task's (see ``Test.resolved_section``), without storing it.
+TASK_SECTIONS: ContextVar[Mapping[Path, str]] = ContextVar(
+    "TASK_SECTIONS", default=MappingProxyType({})
+)
+
+
+class LiveSource(Protocol):
+    """
+    Where tests take the code under test from while they run on code that isn't saved
+    yet (see ``LIVE_SOURCE``), e.g. on the objects a notebook's kernel defines.
+    """
+
+    def module(self, path: StrPath) -> ModuleType | None:
+        """The code of the exercise file at ``path`` as a module, or None if this
+        source doesn't hold it, so that the file is loaded as usual."""
+        ...
+
+
+# Set by a plugin while the tests run on code that isn't saved yet (see ``LiveSource``):
+# ``Test.load_solution`` takes the code of the files it holds from it, and
+# ``PrintTest``s and ``StructureTest``s are skipped, as they run on the saved file.
+LIVE_SOURCE: ContextVar[LiveSource | None] = ContextVar("LIVE_SOURCE", default=None)
+
+
+def _skip_live_run() -> None:
+    """Skip the running test if it runs on code that isn't saved yet (see
+    ``LIVE_SOURCE``)."""
+    if LIVE_SOURCE.get() is not None:
+        pytest.skip("runs when the notebook is saved")
 
 
 class MarkupAssertionError(AssertionError):
@@ -28,6 +78,10 @@ class Test(ABC):
 
     name: str
     file_path: StrPath
+    # the section of the notebook ``file_path`` the test is about (see
+    # ``resolved_section``): None for the whole notebook, which is all that tests of
+    # other kinds than ``PrintTest`` and ``StructureTest`` are about
+    section: str | None | Inherit = None
     # whether the test runs the code in ``file_path``, which can then be traced (see
     # ``run``)
     supports_trace: ClassVar[bool] = False
@@ -52,7 +106,18 @@ class Test(ABC):
         With ``trace``, the file's code is watched by it (see ``Trace.watch``), so that
         the calls into it that are run by ``trace`` are traced. A script is traced as a
         whole, while importing a module isn't.
+
+        A notebook's code cells are run instead (see ``loader.run_notebook``), where an
+        error in a cell doesn't stop the run. While a ``LIVE_SOURCE`` that holds the
+        file is set, its module is returned instead, untraced.
         """
+        if (source := LIVE_SOURCE.get()) is not None and (
+            module := source.module(self.file_path)
+        ) is not None:
+            return module
+        if cells.is_notebook(self.file_path):
+            return loader.load_module(self.file_path, as_main=as_main, trace=trace)
+
         spec: ModuleSpec | None = iutil.spec_from_file_location(
             name="current_solution", location=self.file_path
         )
@@ -77,6 +142,17 @@ class Test(ABC):
             exec(code, module.__dict__)  # noqa: S102
 
         return module
+
+    def resolved_section(self) -> str | None:
+        """
+        The name of the section of the notebook ``file_path`` the test is about (see
+        ``pyics.notebook.sections``), or None for the whole notebook: its own
+        ``section``, or if it wasn't given one, its task's section for its file while
+        the task's tests run (see ``TASK_SECTIONS``).
+        """
+        if self.section is INHERIT:
+            return TASK_SECTIONS.get().get(paths.absolute(self.file_path))
+        return self.section
 
     def serialize(self) -> str:
         """turn this test object into a dictionary for export"""
@@ -107,6 +183,19 @@ class PrintTest(Test):
     that isn't visible in a console is ignored. Only the output of the thread running the
     test is captured, so that other threads (e.g. the CLI's) can keep writing to the
     console in the meantime.
+
+    A notebook's code cells are run instead, and their output is compared, which
+    includes what Jupyter shows as text: the ``repr`` of objects passed to ``display``,
+    and of each cell's final expression (unless it is ``None``, or the cell ends with
+    ``;``). It only has to contain the desired output, so that what students output
+    besides (e.g. the value of an expression they left at the end of a cell) doesn't
+    fail the test: ``[1, 2]`` is also found in ``[[1, 2]]``. If no output is desired,
+    there must be none. With a ``section`` (see ``Test.resolved_section``), the whole
+    notebook is run, but only the output of the section's cells is compared. A test
+    that isn't given a ``section`` inherits its task's; None compares the output of
+    all cells.
+
+    While a ``LIVE_SOURCE`` is set, it is skipped.
     """
 
     expected: str  # printout is necessarily str
@@ -115,6 +204,9 @@ class PrintTest(Test):
     # whether the test may be traced, e.g. by students who want to see what their code
     # does. Also the default for tests stored before it was introduced.
     traceable: bool = True
+    # only set if the test is given a section, so that tests that inherit their task's
+    # section store nothing (and tests stored before sections inherit it, too)
+    section: str | None | Inherit = INHERIT
 
     def __init__(
         self,
@@ -124,6 +216,7 @@ class PrintTest(Test):
         *,
         inputs: list[str] = [],
         traceable: bool = True,
+        section: str | None | Inherit = INHERIT,
         **kwargs,
     ):
         if isinstance(inputs, str):
@@ -133,17 +226,32 @@ class PrintTest(Test):
         self.expected = expected
         self.inputs = [str(answer) for answer in inputs]
         self.traceable = traceable
+        if section is not INHERIT:
+            self.section = None if section is None else sections.check_name(section)
 
     def run(self, trace: Trace | None = None) -> None:
+        _skip_live_run()
         trace = trace if self.traceable else None
+        is_notebook = cells.is_notebook(self.file_path)
         with capture_stdout() as buffer, provide_input(self.inputs):
-            try:
-                self.load_solution(as_main=True, trace=trace)
-            except SystemExit:
-                pass  # the program ended
+            if is_notebook:
+                if (section := self.resolved_section()) is not None:
+                    # a missing section fails the test before the notebook is run
+                    sections.get_section(cells.read(self.file_path), section)
+                # each cell's output is captured on its own
+                run = loader.run_notebook(self.file_path, as_main=True, trace=trace)
+                buffer.write(run.output(section=section))
+            else:
+                try:
+                    self.load_solution(as_main=True, trace=trace)
+                except SystemExit:
+                    pass  # the program ended
         res, expected = _visible(buffer.getvalue()), _visible(self.expected)
+        # a notebook's output only has to contain the expected one, unless there is
+        # none, which any output would contain
+        contains = is_notebook and expected != ""
 
-        if res != expected:
+        if not (expected in res if contains else res == expected):
             expl = list(
                 assertrepr_compare(
                     "==",
@@ -154,6 +262,9 @@ class PrintTest(Test):
                     assertion_text_diff_style="ndiff",
                 )
             ) or [f"{res!r} == {expected!r}"]
+            if contains:
+                # the summary of what was compared, above the diff
+                expl[0] = compare.summary(expected, res, op="in")
 
             raise AssertionError("\n".join(expl))
 
@@ -256,28 +367,71 @@ class StructureTest(Test):
 
     ``rules`` is a rule dict or a list of rule dicts (see ``check_structure``), e.g.
     ``{"concept": "recursion", "scope": "fib"}``. The file is parsed, but not executed.
+
+    Of a notebook, the code cells are checked (see ``loader.python_source``), and lines
+    are named by their cell, e.g. "cell 3, line 2". With a ``section`` (see
+    ``Test.resolved_section``), only the code cells of that section are checked, and
+    the test fails if one of them can't be parsed. A test that isn't given a
+    ``section`` inherits its task's; None checks all code cells, leaving out those that
+    can't be parsed (they are named if the test fails).
+
+    While a ``LIVE_SOURCE`` is set, it is skipped.
     """
 
     rules: list[check_structure.Rule]
+    # only set if the test is given a section, so that tests that inherit their task's
+    # section store nothing (and tests stored before sections inherit it, too)
+    section: str | None | Inherit = INHERIT
 
     def __init__(
         self,
         name: str,
         file_path: StrPath,
         rules: list[check_structure.Rule] | check_structure.Rule,
+        *,
+        section: str | None | Inherit = INHERIT,
         **kwargs,
     ):
         self.name = name
         self.file_path = file_path
         self.rules = check_structure.validate_rules(rules)
+        if section is not INHERIT:
+            self.section = None if section is None else sections.check_name(section)
 
     def run(self, trace: Trace | None = None) -> None:
+        _skip_live_run()
         path = Path(self.file_path)
-        diff = check_structure.check_structure(
-            self.rules, path.read_text(encoding="utf-8"), filename=path.name
-        )
+        if cells.is_notebook(path):
+            section = self.resolved_section()
+            source = loader.python_source(path, section=section)
+            diff = self._check_notebook(source, path.name, whole=section is None)
+        else:
+            diff = check_structure.check_structure(
+                self.rules, path.read_text(encoding="utf-8"), filename=path.name
+            )
         if diff:
             raise MarkupAssertionError("\n".join(diff))
+
+    def _check_notebook(
+        self, source: loader.NotebookSource, filename: str, *, whole: bool = True
+    ) -> list[str]:
+        """
+        Messages for the rules that don't hold for the code cells ``source``. Of the
+        ``whole`` notebook, the cells left out since they can't be parsed are named if
+        a rule doesn't hold, as that may be why. Of a section, they fail the test, like
+        a Python file that can't be parsed.
+        """
+        unparsable = [
+            f"Could not parse cell {cell.number}: {escape(err.msg)} "
+            f"(line {err.lineno})."
+            for cell, err in source.unparsable
+        ]
+        if unparsable and not whole:
+            return unparsable
+        diff = check_structure.check_structure(
+            self.rules, source.source, filename=filename, locate=source.locate
+        )
+        return diff + unparsable if diff else []
 
 
 class SizeTest(Test):

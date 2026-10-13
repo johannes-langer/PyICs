@@ -53,6 +53,19 @@ When a test fails, <kbd>t</kbd> runs the task's tests again with [snoop](https:/
 
 Function tests (``SimpleTest``) trace the call of the tested function, and output tests (``PrintTest``) the run of the whole file. Their authors can turn tracing off for a test by creating it with ``traceable=False``, e.g. so that its arguments aren't revealed. Tests that check the structure or the signatures of your code (``StructureTest``, ``SpecTest``) aren't traced.
 
+#### Jupyter Notebooks
+
+- A notebook comes without a kernel, so Jupyter or VS Code asks you to select one. Choose the environment in which PyICs is installed, as that is where the tests run.
+- The tests of a task run whenever you **save** its notebook (<kbd>ctrl</kbd>+<kbd>s</kbd>, or when Jupyter autosaves it), like when you save a Python file.
+- They run the code cells of the saved notebook from the top, the way _Restart Kernel and Run All Cells_ does. An error in a cell doesn't stop the run, so an unfinished exercise further down doesn't fail the tests of the exercises above it. When a test fails, its message names the cells that raised an error, e.g. ``cell 7 raised NameError: name 'qeue' is not defined``. Cells are counted from the top, markdown cells included.
+- Notebook-only syntax in a test run:
+  - ``%%time``, ``%%timeit`` and ``%%capture`` run their cell once, without timing it, and so do ``%time`` and ``%timeit`` for their line. What ``%%capture`` captures isn't part of the output.
+  - Other cell magics (e.g. ``%%writefile``, ``%%bash``) skip their cell, and line magics (e.g. ``%matplotlib inline``, ``%pip install``) and shell commands (``!ls``) do nothing: ``files = !ls`` gives an empty list.
+  - ``display(x)`` prints ``x`` as Jupyter shows it as text (its ``repr``), whether or not you import it from ``IPython.display``. Plots are drawn without a window, so ``plt.show()`` doesn't wait for one to be closed.
+- Cells tagged ``skip-execution`` don't run in tests, e.g. a long download or training run. Tags are edited in JupyterLab's property inspector, or with _Add Cell Tag_ in VS Code.
+- Output tests (``PrintTest``) compare what all cells output: what they print, and what Jupyter shows as text, i.e. displayed objects, and the value of a cell whose last line is an expression (``Out[n]``), unless it is ``None`` or the line ends with ``;``. The expected output only has to be part of it, so what you output besides, e.g. while trying things out, doesn't fail the test.
+- Traces (<kbd>t</kbd>) and the messages of structure tests name cells and their lines, e.g. ``bfs.ipynb:cell 3`` or ``cell 3, line 2``.
+
 ### As an Instructor
 
 PyICs packages a number of scripts to create, edit, and distribute courses. The process of creating a course and recommended practices are described below.
@@ -124,7 +137,7 @@ Structure tests can test _how_ tasks are solved by leveraging the ``ast`` builti
 
 Print tests can test whether the stdout of students' files match a desired output. A ``PrintTest`` additionally expects the following parameters:
 
-- ``expected``: The expected output of the targeted file to stdout.
+- ``expected``: The expected output of the targeted file to stdout. The output of a Python file has to match it, while the output of a notebook only has to contain it (see [Jupyter Notebooks](#jupyter-notebooks)).
 - ``inputs``: A list of inputs to provide to the file in case the running script expects inputs (from the builtin ``input()`` function).
 - ``traceable``: Whether a detailed trace of teh function can be displayed. Defaults to ``True``, can be turned off if the trace would give away too much of the solution (use sparingly).
 
@@ -168,6 +181,29 @@ Students add its URL with ``pyics add_source``. A course archive can also be pul
 
 Archives are checked before anything of them is used: they can't write files outsinde the directory they are pulled to, their has h has to match the index, and they can only name the modules of the packages they declare.
 
+#### Jupyter Notebooks
+
+- ``create_task`` and ``edit_task`` accept notebooks as exercise and solution files, and all tests work with them. ``SimpleTest``s and ``SpecTest``s find functions and classes by name, in whichever cell students define them. ``StructureTest``s check the code of all code cells: cells that can't be parsed are left out, and named in the message if the test fails. ``PrintTest``s compare the output of all cells. Both can be restricted to a part of the notebook instead (see [Sections](#sections)).
+- The output of a notebook only has to **contain** the ``expected`` output of a ``PrintTest``, rather than match it like the output of a Python file, since students also output other things in the cells of an exercise, e.g. the value of an expression they left at the end of a cell. Whitespace at the ends of lines is ignored, as usual. Short expected outputs are found easily: ``[a, b]`` is also found in ``[[a, b]]``, and ``3`` in ``13``, so expect enough to tell a right output from a wrong one, e.g. ``Sum: 3``. A test that expects no output still fails if there is any.
+- Notebooks are stored normalized in task files: without their outputs and execution counts, so that the outputs of solutions don't reach students and task files stay small. Their kernel (``kernelspec``) isn't stored either, as it names an environment on your machine: students are asked to select a kernel of their own when they first open or run the notebook. A notebook you merely ran, or ran with another kernel, doesn't count as changed when you edit the task. If it did change, ``edit_task`` shows the difference as the text of its cells (``# %% cell 3`` blocks) rather than as JSON. If only its metadata changed (e.g. the tags of its cells), it says so.
+- A notebook, e.g. the solution notebook, can be the test information file. Its code cells run as they do in tests, and its variables are offered for the test's parameters, e.g. a function as the ``expected`` signature of a ``SpecTest``. An error in a cell doesn't stop the run, and the prompts name the cell that raised it.
+- The tests run in the directory PyICs was started in, while Jupyter runs a notebook in the notebook's directory: a file that a notebook opens by a relative path is looked up in different directories by the two.
+- Keep the exercise notebooks in a visible directory, as ``examples/search_notebook`` does, rather than in ``.exercises/``: JupyterLab only opens notebooks in hidden directories if it runs with ``--ContentsManager.allow_hidden=True``.
+- ``pack`` finds the packages imported in the code cells of notebooks, too. If the course's ``requires`` don't declare them, it shows the ``%pip install`` (and ``!pip install``) lines of its notebooks as hints, e.g. ``lecture.ipynb (cell 2): %pip install numpy``. These lines do nothing in tests, so the packages have to be declared. ``pack`` also warns about tasks that share a notebook, but store different contents for it (see [Sections](#sections)).
+- An alternative that needs no notebook support is to pair a notebook with a Python file using [Jupytext](https://jupytext.readthedocs.io), and to use the ``.py`` file as the exercise file (magics are commented out in it). Students then need Jupytext in their Jupyter, and pairing tends to confuse beginners.
+
+Sections link a task to a part of a notebook, e.g. to one exercise of a lecture's notebook that holds several.
+
+- **Where a section starts:** at a cell tagged ``pyics:<name>``, or at a cell whose first line is the marker ``<!-- pyics: <name> -->`` (a markdown cell) or ``# pyics: <name>`` (a code cell). Names consist of letters, digits, ``_``, ``.`` and ``-``, e.g. ``ex2``. Tags are Jupyter's own way to mark cells, but hidden in most frontends. Markers are visible everywhere, and students can restore one they deleted.
+- **Where it ends:** just before the next section starts, or at the end of the notebook. Cells above the first section belong to none. If several cells start a section of the same name (e.g. a copied cell), the first of them does.
+- **Where to put it:** on the exercise's description, a markdown cell that students have no reason to change. The cells they add below it, split or move belong to the section, as long as they stay above the next one.
+- **A task's section:** ``create_task`` and ``edit_task`` ask which section of each notebook exercise file the task is about (if the notebook has sections), and store it in the task file (``"sections"``, by the notebook's path relative to the task file). Older versions of PyICs ignore it.
+- **Its tests:** ``StructureTest``s check only the code cells of the section, and fail if one of them can't be parsed. ``PrintTest``s compare only the output of the section's cells, while the whole notebook still runs, as a section usually needs the imports and data above it. ``SimpleTest``s and ``SpecTest``s find functions and classes by name, wherever they are defined, and aren't affected by sections.
+- **A test's own section:** ``StructureTest``s and ``PrintTest``s use the task's section, unless they are given one of their own: ``section="ex1"`` for another section, or ``section=None`` for the whole notebook. ``create_task`` offers _The task's section_, _Whole notebook_ and the notebook's other sections. A test that uses the task's section stores nothing, so it follows when the task's section is changed.
+- **Finding it:** the title of the main panel names the task's section after the notebook's path, e.g. ``lecture.ipynb › Exercise 2: Breadth-First Search``: the first heading of the cell that starts it, or else its name, looked up in the saved notebook. JupyterLab's _Table of Contents_ and VS Code's _Outline_ (<kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>o</kbd>) list the notebook's headings.
+- **A missing section fails its tests** with an explanation, e.g. ``Section 'ex2' not found: the cell that starts it (tagged 'pyics:ex2', or starting with the marker '# pyics: ex2') was removed or its tag changed.``, and the title shows ``section 'ex2' not found``. Tests never check another part of the notebook instead.
+- **Several tasks in one notebook:** each task lists the same notebook among its exercise files, with its own section, and is solved on its own. The first of them that is set up creates the notebook (an existing exercise file is never overwritten), so they should all store the same contents for it: ``pack`` warns if they don't, and so does ``edit_task`` after writing a task (choose _Update_ for the notebook to store it as it is on disk).
+
 ## Technical Information
 
 This project is managed using ``uv``. If you want to contribute to the project, run ``uv sync`` after cloning the repository at the top level to create a virtual environment with the required packages installed.
@@ -180,4 +216,6 @@ The ``src/pyics`` directory contains the following submodules:
 - ``scripts`` which contains the executable scripts
 - ``tests`` which contains anything related to dynamic test objects (the core testing logic for student code)
 - ``distribution`` which packs, publishes and pulls courses, and checks the packages they need
+- ``notebook`` which reads Jupyter notebooks, runs their code cells as exercise files, and finds their sections
+- ``plugins`` which loads plugins, packages that extend pyics through [pluggy](https://pluggy.readthedocs.io) hooks, e.g. ``pyics-jupyter``
 - ``util`` containing logic for json handling and logging

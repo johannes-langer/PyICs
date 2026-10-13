@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from os import PathLike
 from pathlib import Path
 import threading
+import time
 from typing import Any, Union
 
 import pytest
@@ -14,12 +15,16 @@ from rich.table import Table
 from rich.text import Text
 
 import pyics.util.json_handling as json
+from pyics import plugins
 from pyics.distribution.dependencies import ModulePolicy, check_task_data
+from pyics.notebook import cells
+from pyics.notebook import sections as notebook_sections
 from pyics.util import paths, terminal
 from pyics.util.paths import StrPath
 from pyics.util.logging import get_logger
 from pyics.tests import Test
-from pyics.tests.pytest_integration import LiveTestCollectionPlugin, RichFailureRepr
+from pyics.tests.pytest_integration import LiveTestCollectionPlugin
+from pyics.tests.results import TestResult
 
 # pytest runs aren't thread-safe (e.g. the tests import the exercise file as the module
 # ``current_solution``), so all tasks' runs are serialized
@@ -36,19 +41,15 @@ def wait_for_test_runs(timeout: float = -1) -> None:
         _pytest_lock.release()
 
 
-def _failure_text(report: pytest.TestReport) -> Text:
-    """The failure message of ``report``, highlighted if it comes from a ``PyicsItem``"""
-    if isinstance(report.longrepr, RichFailureRepr):
-        return report.longrepr.text
-    return Text(report.longreprtext)
+def _failure_text(result: TestResult) -> Text:
+    """The failure message of ``result``, highlighted if it comes from a ``PyicsItem``"""
+    return result.message_text
 
 
-def _failure_trace(report: pytest.TestReport) -> Text | None:
-    """The trace of the failed test of ``report``, or why there is none, if it was run
+def _failure_trace(result: TestResult) -> Text | None:
+    """The trace of the failed test of ``result``, or why there is none, if it was run
     with tracing (see ``Task.tracing``)"""
-    if isinstance(report.longrepr, RichFailureRepr):
-        return report.longrepr.trace
-    return None
+    return result.trace_text
 
 
 def _traceable(test: Test) -> bool:
@@ -84,6 +85,20 @@ def _hint_list(hints: str | Sequence[str] | None) -> list[str]:
     if isinstance(hints, str):
         return [hints]
     return list(hints)
+
+
+def _read_sections(raw_json: Mapping[str, Any], base: Path) -> dict[Path, str]:
+    """The ``sections`` of a task file read from the directory ``base``, by notebook
+    path resolved relative to ``base`` (see ``create_task_json``). Entries that aren't a
+    path and the name of a section are left out."""
+    stored = raw_json.get("sections")
+    if not isinstance(stored, Mapping):
+        return {}
+    return {
+        paths.resolve(path, base): name
+        for path, name in stored.items()
+        if isinstance(path, str) and notebook_sections.is_name(name)
+    }
 
 
 class Task:
@@ -145,6 +160,13 @@ class Task:
         self.solution_files: list[Path] = [
             paths.resolve(fp, base) for fp in raw_json.get("sol_files", [])
         ]
+        # the section of each exercise notebook the task is about, by the notebook's
+        # absolute path (see ``pyics.notebook.sections``). Its tests inherit it, unless
+        # they have a section of their own (see ``Test.resolved_section``).
+        self.sections: dict[Path, str] = {
+            paths.absolute(path): name
+            for path, name in _read_sections(raw_json, base).items()
+        }
 
         # kept until the files are created; the code does not need to be in memory after
         self.__code: tuple[list[str], list[str]] | None = (
@@ -158,11 +180,19 @@ class Task:
 
         self.__info = self.instructions
         self.__status = Text("tests pending...", style="dim")
-        self.test_results: list[pytest.TestReport] = []
+        self.test_results: list[TestResult] = []
         self.__tested = False
 
         self._tests_lock = threading.Lock()
         self._tests_pending = False
+        # when the version of the exercise files that ``test_results`` come from was
+        # saved: the latest of their modification times when the run started
+        self.test_results_time: float | None = None
+        # a plugin's overlay of the results (see ``check_overlay``), asked for once
+        self.__overlay: plugins.ResultsOverlay | None = None
+        self.__overlay_asked = False
+        # the status is updated by test runs and by the overlay, in different threads
+        self.__status_lock = threading.RLock()
 
         self.last_mtimes: dict[Path, float] = {}
         if setup:
@@ -237,14 +267,29 @@ class Task:
         return self.__status
 
     def update_status(self) -> None:
-        """Update the status from the test reports"""
+        """Update the status from the test reports, as the results overlay shows them
+        if there is one (see ``check_overlay``)"""
+        with self.__status_lock:
+            self.__update_status()
+
+    def __update_status(self) -> None:
+        # progress only counts the results of the saved files, never the overlay's
+        saved = [r.outcome == "passed" for r in self.test_results if r.when == "call"]
+        self.__solved = bool(saved) and round(100 * sum(saved) / len(saved)) == 100
+
+        results, lines = self.test_results, []
+        if self.__overlay is not None:
+            try:
+                overlay = self.__overlay.apply(self.test_results, self.test_results_time)
+                results, lines = overlay.results, overlay.lines
+            except Exception:  # noqa: BLE001
+                get_logger(__name__).warning("The results overlay failed", exc_info=True)
+
         # filter tests for only call tests
-        relevant_reports = [r for r in self.test_results if r.when == "call"]
+        relevant_reports = [r for r in results if r.when == "call"]
         passed = [r.outcome == "passed" for r in relevant_reports]
         failed_reports = [r for r in relevant_reports if r.outcome == "failed"]
         pass_rate = round(100 * sum(passed) / len(passed)) if passed else 0
-
-        self.__solved = pass_rate == 100
 
         # result summary, box=None so the row reaches the panel's own border
         summary = Table(expand=True, show_header=False, box=None, padding=0)
@@ -255,7 +300,7 @@ class Task:
             f"[{'bright_green' if pass_rate == 100 else 'bright_red'}]{pass_rate}%[/]",
         )
 
-        sections: list[RenderableType] = [summary]
+        sections: list[RenderableType] = [summary, *lines]
         if self.__traced:
             sections.append(
                 Text("Tracing failed tests with snoop, press t to stop.", style="dim")
@@ -342,6 +387,45 @@ class Task:
         self.__tracing = not self.__tracing
         self.run_tests()
 
+    def check_overlay(self) -> bool:
+        """
+        Ask the plugins for an overlay of the task's results the first time (see
+        ``plugins.ResultsOverlay``), and from then on, whether it has new results, to
+        update the status if it has. Cheap enough to call at every tick of the TUI;
+        without plugins, it does nothing after the first call.
+
+        Returns
+        -------
+        bool
+            True if the overlay has new results
+        """
+        changed = False
+        if not self.__overlay_asked:
+            self.__overlay_asked = True
+            try:
+                overlay = plugins.manager().hook.pyics_results_overlay(task=self)
+            except Exception:  # noqa: BLE001
+                get_logger(__name__).warning("A plugin failed", exc_info=True)
+                overlay = None
+            self.__overlay = overlay
+            # the status may have been drawn without it
+            changed = overlay is not None
+        if self.__overlay is None:
+            return False
+        try:
+            changed = self.__overlay.poll() or changed
+        except Exception:  # noqa: BLE001
+            # asked again at the next tick
+            get_logger(__name__).debug("The results overlay failed", exc_info=True)
+        if changed:
+            with self.__status_lock:
+                # until the files have been tested, the status says the tests are
+                # pending
+                if self.__tested:
+                    self.update_status()
+                    self.__new_test_results = True
+        return changed
+
     def check_file_changes(self) -> bool:
         """
         Check whether an exercise file has been changed by monitoring the last modified
@@ -404,23 +488,38 @@ class Task:
         while self._tests_pending:
             self._tests_pending = False
             tracing = self.__tracing
-            plugin = LiveTestCollectionPlugin(self.tests, tracing=tracing)
+            plugin = LiveTestCollectionPlugin(
+                self.tests, tracing=tracing, sections=self.sections
+            )
+            saved_at = self.__saved_at()
 
             with _pytest_lock, terminal.preserve_terminal_mode():
                 pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
 
-            self.test_results = plugin.reports
-            self.__traced = tracing
-            self.__tested = True
-
             # log reports
             logger = get_logger(__name__)
-            for rep in self.test_results:
-                logger.debug(f"{rep.nodeid} {rep.when} {rep.outcome}")
-                logger.debug(rep.longreprtext)
+            for result in plugin.results:
+                logger.debug(f"{result.nodeid} {result.when} {result.outcome}")
+                logger.debug(_failure_text(result).plain)
 
-            self.update_status()
-            self.__new_test_results = True
+            with self.__status_lock:
+                self.test_results = plugin.results
+                self.test_results_time = saved_at
+                self.__traced = tracing
+                self.__tested = True
+                self.update_status()
+                self.__new_test_results = True
+
+    def __saved_at(self) -> float:
+        """When the exercise files were last saved: the latest of their modification
+        times, or now if none can be told (see ``test_results_time``)."""
+        times = []
+        for f in self.exercise_files:
+            try:
+                times.append(os.path.getmtime(f))
+            except OSError:
+                pass
+        return max(times, default=time.time())
 
     def create_files(
         self,
@@ -477,8 +576,9 @@ class Task:
         Returns
         -------
         dict[str, Any]
-            ``name``, ``instructions``, ``ex_files``, ``sol_files``, ``tests`` and
-            ``help``, and the contents stored for the exercise and solution files as
+            ``name``, ``instructions``, ``ex_files``, ``sol_files``, ``tests``,
+            ``help`` and ``sections`` (by notebook path, resolved like ``ex_files``),
+            and the contents stored for the exercise and solution files as
             ``file_contents``, by path.
         """
         raw_json = _load_task_json(fp)
@@ -503,6 +603,7 @@ class Task:
             "tests": tests,
             "file_contents": file_contents,
             "help": _hint_list(raw_json.get("help")),
+            "sections": _read_sections(raw_json, base),
         }
 
     @staticmethod
@@ -515,6 +616,7 @@ class Task:
         tests: Union[Test, list[Test], None] = None,
         file_contents: Mapping[StrPath, str] | None = None,
         help: str | Sequence[str] | None = None,
+        sections: Mapping[StrPath, str] | None = None,
     ) -> Path:
         """
         Create a task_json from all relevant information as it would naturally be available
@@ -542,16 +644,30 @@ class Task:
         file_contents: Mapping[StrPath, str] | None
             Contents to store for some of the exercise and solution files, by path,
             instead of reading these files, e.g. the contents already stored in the task
-            file when editing it (see ``read_task_json``). Other files are read.
+            file when editing it (see ``read_task_json``). Other files are read. The
+            contents of notebooks are stored normalized (see ``cells.normalize``), e.g.
+            without their outputs.
         help: str | Sequence[str] | None
             Hint or list of hints for the task, which the student can reveal one at a
             time, in order.
+        sections: Mapping[StrPath, str] | None
+            The section the task is about (see ``pyics.notebook.sections``) of some of
+            its exercise notebooks, by path. Its tests inherit it, unless they have a
+            section of their own. Stored as ``sections``, by the notebook's path
+            relative to the task file (with forward slashes), and left out if empty.
+            Older versions of pyics ignore it.
 
         Returns
         -------
         Path
             The path the task file was written to, with its suffix normalized to
             '.pyicstask.json'.
+
+        Raises
+        ------
+        ValueError
+            If a path of ``sections`` isn't one of the exercise notebooks, or a name in
+            it can't be the name of a section.
         """
         fp = Path(fp)
         base = fp.parent
@@ -566,12 +682,29 @@ class Task:
         task["ex_files"] = [paths.relative_to(f, base) for f in ex_files]
         task["sol_files"] = [paths.relative_to(f, base) for f in sol_files]
 
+        notebooks = {paths.absolute(f) for f in ex_files if cells.is_notebook(f)}
+        stored_sections = {}
+        for path, section in (sections or {}).items():
+            if paths.absolute(path) not in notebooks:
+                raise ValueError(
+                    f"{path} has a section, but isn't one of the exercise notebooks"
+                )
+            key = paths.relative_to(path, base).as_posix()
+            stored_sections[key] = notebook_sections.check_name(section)
+        if stored_sections:
+            task["sections"] = stored_sections
+
         contents = {paths.absolute(f): c for f, c in (file_contents or {}).items()}
 
         def read(f: StrPath) -> str:
             if (key := paths.absolute(f)) in contents:
-                return contents[key]
-            return Path(f).read_text(encoding="utf-8")
+                text = contents[key]
+            else:
+                text = Path(f).read_text(encoding="utf-8")
+            if cells.is_notebook(f):
+                # without outputs, which would leak the solution's, and bloat the file
+                return cells.normalize(text, name=Path(f).name)
+            return text
 
         task["exercise_code"] = [read(f) for f in ex_files]
         task["solution_code"] = [read(f) for f in sol_files]

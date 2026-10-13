@@ -34,9 +34,11 @@ def _pandas_types() -> tuple[type, ...]:
     return () if pd is None else (pd.DataFrame, pd.Series, pd.Index)
 
 
-def _summary(res: Any, expected: Any) -> str:
-    left = saferepr(res, maxsize=_SUMMARY_SIZE)
-    return f"{left} == {saferepr(expected, maxsize=_SUMMARY_SIZE)}"
+def summary(left: Any, right: Any, *, op: str = "==") -> str:
+    """The comparison of ``left`` and ``right`` by ``op`` in a line, with both
+    shortened, e.g. ``'3' in '9'``."""
+    left = saferepr(left, maxsize=_SUMMARY_SIZE)
+    return f"{left} {op} {saferepr(right, maxsize=_SUMMARY_SIZE)}"
 
 
 def _type_name(value: Any) -> str:
@@ -75,7 +77,7 @@ def equal(res: Any, expected: Any) -> bool:
         return bool(eq)
     except Exception as error:  # e.g. element by element, by an unknown array type
         raise IncomparableError(
-            f"{_summary(res, expected)}\n\nCan't tell whether they are equal: == gave "
+            f"{summary(res, expected)}\n\nCan't tell whether they are equal: == gave "
             f"{saferepr(eq, maxsize=_SUMMARY_SIZE)}, not True or False"
         ) from error
 
@@ -179,4 +181,4 @@ def explain(res: Any, expected: Any) -> list[str]:
             assertion_text_diff_style="ndiff",
         )
         return list(lines) or [f"{res!r} == {expected!r}"]
-    return [_summary(res, expected), *(["", *details] if details else [])]
+    return [summary(res, expected), *(["", *details] if details else [])]
