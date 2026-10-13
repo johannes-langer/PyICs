@@ -16,8 +16,9 @@ from pyics.util.paths import StrPath
 NOTEBOOK_SUFFIX = ".ipynb"
 
 # metadata that running a notebook (or looking at its outputs) changes, and that the
-# frontend fills in again: of the notebook, and of its cells
-_RUN_METADATA = ("language_info", "widgets")
+# frontend fills in again: of the notebook, and of its cells. That includes the kernel
+# its author chose (``kernelspec``), which names an environment on their machine
+_RUN_METADATA = ("kernelspec", "language_info", "widgets")
 _RUN_CELL_METADATA = ("execution", "ExecuteTime", "collapsed", "scrolled")
 
 
@@ -130,8 +131,8 @@ def code_cells(nb: dict[str, Any]) -> list[Cell]:
 def normalize(text: str, *, name: str | None = None) -> str:
     """
     The notebook ``text`` as task files store it: without what running it changes, i.e.
-    its outputs, execution counts and the metadata of the run (e.g. execution times).
-    Sources are stored as lists of lines, and the JSON is written like Jupyter writes
+    its outputs, execution counts and the metadata of the run (e.g. execution times),
+    and without its kernel (``kernelspec``), so that students choose their own. Sources are stored as lists of lines, and the JSON is written like Jupyter writes
     it, so that a notebook that was merely run, or saved by another frontend, is stored
     the same.
 

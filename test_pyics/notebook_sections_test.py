@@ -339,7 +339,7 @@ def test_print_tests_compare_the_output_of_their_section(lecture: Path) -> None:
         "whole notebook": "",
     }
     results = _run(tests, {lecture: "ex1"})
-    assert results["inherits"].startswith("inherits failed: ")
+    assert results["inherits"].startswith("inherits failed: '3' in '9'")
     assert "- 3" in results["inherits"].splitlines()  # expected
     assert "+ 9" in results["inherits"].splitlines()  # printed by ex1
 

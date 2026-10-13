@@ -23,6 +23,7 @@ tagged ``skip-execution`` (e.g. downloads or training) don't run.
 import ast
 import contextlib
 import functools
+import importlib
 import io
 import linecache
 import os
@@ -333,6 +334,51 @@ def _display(*objs: object, **kwargs: object) -> None:
         print(repr(obj))
 
 
+class _ThreadLocalDisplay:
+    """
+    ``IPython.display.display`` replacement that shows the objects of a thread that
+    runs a notebook's cells like ``_display``. Without a shell, IPython's own prints
+    their ``str`` instead, so that notebooks that import ``display`` would output
+    something else than those that use the one Jupyter provides. Other threads are
+    unaffected, e.g. the one that runs a kernel's cells.
+    """
+
+    def __init__(self, real: Callable[..., Any]):
+        self._real = real
+        functools.update_wrapper(self, real)
+
+    def __call__(self, *objs: object, **kwargs: Any) -> Any:
+        if getattr(_local, "text_display", False):
+            return _display(*objs, **kwargs)
+        return self._real(*objs, **kwargs)
+
+
+_install_lock = threading.Lock()
+# the modules that notebooks import IPython's ``display`` from
+_DISPLAY_MODULES = ("IPython.core.display_functions", "IPython.display")
+
+
+def _ensure_display_installed() -> None:
+    with _install_lock:
+        for name in _DISPLAY_MODULES:
+            module = importlib.import_module(name)
+            if not isinstance(module.display, _ThreadLocalDisplay):
+                module.display = _ThreadLocalDisplay(module.display)
+
+
+@contextlib.contextmanager
+def _text_display() -> Generator[None]:
+    """Show the objects this thread passes to IPython's own ``display``, which
+    notebooks get by ``from IPython.display import display``, like ``_display``."""
+    _ensure_display_installed()
+    previous = getattr(_local, "text_display", False)
+    _local.text_display = True
+    try:
+        yield
+    finally:
+        _local.text_display = previous
+
+
 class _CapturedIO:
     """What ``%%capture <name>`` assigns to ``<name>``: the output of the cell."""
 
@@ -500,8 +546,9 @@ def run_notebook(
 
     An error in a cell is recorded, and the next cell still runs. ``SystemExit`` ends
     the run, like a script that exits. Cells tagged ``skip-execution`` don't run. The
-    module has ``display``, which prints the ``repr`` of objects, and ``get_ipython()``
-    for magics (see ``transform``). Each cell's output is captured on its own (see
+    module has ``display``, which prints the ``repr`` of objects (and so does the one
+    cells import from ``IPython.display``), and ``get_ipython()`` for magics (see
+    ``transform``). Each cell's output is captured on its own (see
     ``NotebookRun.outputs``), so ``input()`` answers given by ``provide_input`` show up
     in the output of the cell that asks for them.
 
@@ -525,7 +572,7 @@ def run_notebook(
     runner = _Runner(path, run, trace)
     code_cells = cells.code_cells(nb)
     try:
-        with _non_interactive_plots():
+        with _non_interactive_plots(), _text_display():
             if trace is not None and as_main:
                 trace.run(lambda: runner.run_cells(code_cells))
             else:

@@ -187,9 +187,13 @@ class PrintTest(Test):
     A notebook's code cells are run instead, and their output is compared, which
     includes what Jupyter shows as text: the ``repr`` of objects passed to ``display``,
     and of each cell's final expression (unless it is ``None``, or the cell ends with
-    ``;``). With a ``section`` (see ``Test.resolved_section``), the whole notebook is
-    run, but only the output of the section's cells is compared. A test that isn't
-    given a ``section`` inherits its task's; None compares the output of all cells.
+    ``;``). It only has to contain the desired output, so that what students output
+    besides (e.g. the value of an expression they left at the end of a cell) doesn't
+    fail the test: ``[1, 2]`` is also found in ``[[1, 2]]``. If no output is desired,
+    there must be none. With a ``section`` (see ``Test.resolved_section``), the whole
+    notebook is run, but only the output of the section's cells is compared. A test
+    that isn't given a ``section`` inherits its task's; None compares the output of
+    all cells.
 
     While a ``LIVE_SOURCE`` is set, it is skipped.
     """
@@ -228,8 +232,9 @@ class PrintTest(Test):
     def run(self, trace: Trace | None = None) -> None:
         _skip_live_run()
         trace = trace if self.traceable else None
+        is_notebook = cells.is_notebook(self.file_path)
         with capture_stdout() as buffer, provide_input(self.inputs):
-            if cells.is_notebook(self.file_path):
+            if is_notebook:
                 if (section := self.resolved_section()) is not None:
                     # a missing section fails the test before the notebook is run
                     sections.get_section(cells.read(self.file_path), section)
@@ -242,8 +247,11 @@ class PrintTest(Test):
                 except SystemExit:
                     pass  # the program ended
         res, expected = _visible(buffer.getvalue()), _visible(self.expected)
+        # a notebook's output only has to contain the expected one, unless there is
+        # none, which any output would contain
+        contains = is_notebook and expected != ""
 
-        if res != expected:
+        if not (expected in res if contains else res == expected):
             expl = list(
                 assertrepr_compare(
                     "==",
@@ -254,6 +262,9 @@ class PrintTest(Test):
                     assertion_text_diff_style="ndiff",
                 )
             ) or [f"{res!r} == {expected!r}"]
+            if contains:
+                # the summary of what was compared, above the diff
+                expl[0] = compare.summary(expected, res, op="in")
 
             raise AssertionError("\n".join(expl))
 

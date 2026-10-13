@@ -159,7 +159,7 @@ def test_other_files_arent_notebooks(text: str, reason: str) -> None:
 
 # --- storing notebooks ---
 
-# the kernel its author chose, which is stored with the notebook
+# the kernel its author chose, which isn't stored with the notebook
 PYTHON3 = {"name": "python3", "display_name": "Python 3"}
 
 
@@ -192,7 +192,7 @@ def _run_notebook_text(source: str = "print('hi')") -> str:
 def test_normalized_notebooks_keep_only_what_their_author_wrote() -> None:
     normalized = cells.normalize(_run_notebook_text())
     nb = std_json.loads(normalized)
-    assert nb["metadata"] == {"kernelspec": PYTHON3, "title": "Greetings"}
+    assert nb["metadata"] == {"title": "Greetings"}  # students choose their kernel
     greeting, printing = nb["cells"]
     assert greeting == {
         "cell_type": "markdown",
@@ -222,6 +222,11 @@ def _notebook_text(source: str = "print('hi')") -> str:
 
 def test_a_notebook_that_was_merely_run_is_stored_the_same() -> None:
     assert cells.normalize(_run_notebook_text()) == cells.normalize(_notebook_text())
+    other_kernel = std_json.loads(_notebook_text())
+    other_kernel["metadata"]["kernelspec"] = {"name": "ml", "display_name": "ML"}
+    assert cells.normalize(std_json.dumps(other_kernel)) == cells.normalize(
+        _notebook_text()
+    )
     changed = _run_notebook_text("print('hello')")
     assert cells.normalize(changed) != cells.normalize(_notebook_text())
 
@@ -493,6 +498,28 @@ def test_the_output_of_cells_never_reaches_the_console(
     assert capsys.readouterr().out == ""
 
 
+def test_imported_display_shows_objects_like_the_builtin_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = write_notebook(
+        tmp_path / "shows.ipynb",
+        [
+            "display('hi', 1.5)",
+            "from IPython.display import display\ndisplay('hi', 1.5)",
+            "import IPython.display\nIPython.display.display('hi')",
+        ],
+    )
+    run = loader.run_notebook(path)
+    assert run.errors == []
+    assert run.outputs == {0: "'hi'\n1.5\n", 1: "'hi'\n1.5\n", 2: "'hi'\n"}
+
+    # only while the notebook runs: without a shell, IPython's own prints them
+    from IPython.display import display
+
+    display("hi")
+    assert capsys.readouterr().out == "hi\n"
+
+
 def test_tracebacks_show_the_cell_and_its_lines(tmp_path: Path) -> None:
     path = write_notebook(
         tmp_path / "bfs.ipynb",
@@ -589,6 +616,37 @@ def test_print_test_compares_the_output_of_all_cells(tmp_path: Path) -> None:
         PrintTest("t", path, expected.replace("'text'", "text")).run()
     assert "- text" in str(excinfo.value).splitlines()  # expected
     assert "+ 'text'" in str(excinfo.value).splitlines()  # printed
+
+
+def test_print_test_finds_the_expected_output_in_a_notebooks_output(tmp_path: Path) -> None:
+    path = write_notebook(
+        tmp_path / "out.ipynb",
+        ["x = [[1, 2]]\nprint('debugging')\nx", "print('Sum:', 3)\nx  # left there"],
+    )
+    for expected in ("[[1, 2]]\nSum: 3", "Sum: 3\n", "[1, 2]", "3"):
+        PrintTest("t", path, expected).run()
+
+    with pytest.raises(AssertionError) as excinfo:
+        PrintTest("t", path, "Sum: 3\n[1, 2]").run()
+    lines = str(excinfo.value).splitlines()
+    assert lines[0] == "'Sum: 3\\n[1, 2]' in 'debugging\\n[...: 3\\n[[1, 2]]'"
+    assert "- [1, 2]" in lines  # expected
+    assert "+ [[1, 2]]" in lines  # printed
+
+    # a script's output has to match
+    script = tmp_path / "out.py"
+    script.write_text("print('debugging')\nprint('Sum:', 3)\n")
+    with pytest.raises(AssertionError, match="'debugging\\\\nSum: 3' == 'Sum: 3'"):
+        PrintTest("t", script, "Sum: 3").run()
+
+
+def test_print_test_expecting_no_output_of_a_notebook(tmp_path: Path) -> None:
+    path = write_notebook(tmp_path / "quiet.ipynb", ["x = 1"])
+    PrintTest("t", path, "\n").run()
+
+    write_notebook(path, ["x = 1\nx"])
+    with pytest.raises(AssertionError, match="'1' == ''"):
+        PrintTest("t", path, "").run()
 
 
 def test_print_test_names_the_cells_that_raised(chdir: Path) -> None:
