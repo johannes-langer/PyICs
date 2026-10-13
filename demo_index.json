@@ -1,0 +1,18 @@
+{
+    "pyics_index": 1,
+    "name": "pyics",
+    "courses": {
+        "search-algorithms": {
+            "title": "Search Algorithms",
+            "description": "Search Algorithms Demo Course",
+            "version": "1.0.0",
+            "requires_pyics": ">=1.0.0",
+            "url": "search-algorithms-1.0.0.zip",
+            "sha256": "a29cce1ff84709082243fa7fb840cdf462fe0f6f11633d4aca89cce5b1963b10",
+            "tags": [
+                "demo",
+                "search"
+            ]
+        }
+    }
+}

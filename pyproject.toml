@@ -1,12 +1,14 @@
 [project]
-name = "pyics"
+name = "python-interactive-courses"
 version = "1.0.0"
 description = "PyICs (Python Interactive Courses) is a modular framework for teaching programming in Python locally, allowing for co-learning of a programming environment."
 readme = "README.md"
+requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "johannes-langer", email = "johannes.langer@uni-bamberg.de" }
 ]
-requires-python = ">=3.14"
 dependencies = [
     "colorama>=0.4.6 ; sys_platform == 'win32'",
     "ipykernel>=7.3.0",
@@ -23,9 +25,16 @@ dependencies = [
     "snoop>=0.6.0",
 ]
 
+[project.urls]
+Repository = "https://github.com/johannes-langer/PyICs"
+Issues = "https://github.com/johannes-langer/PyICs/issues"
+
 [project.scripts]
 pyics = "pyics.scripts.main:run"
 
 [build-system]
-requires = ["uv_build>=0.11.8,<0.12.0"]
+requires = ["uv_build>=0.13.0,<0.14"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "pyics"

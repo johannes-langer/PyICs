@@ -8,9 +8,7 @@ PyICs is a framework for interactive Python tutorials, inspired by the _rustling
 
 ## Installation
 
-PyICs is available via ``pip``. Install the latest version using ``pip install pyics``, requiring ``python>=3.14``. PyICs is available on Windows (Windows 10 or later), MacOS, and Linux.
-
-> This is a draft of the final README. PyICs has not yet been published on pypi.
+PyICs is available via ``pip``. Install the latest version using ``pip install python-interactive-courses``, requiring ``python>=3.14``. PyICs is available on Windows (Windows 10 or later), MacOS, and Linux.
 
 ## Using the PyICs App
 

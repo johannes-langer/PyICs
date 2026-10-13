@@ -185,6 +185,16 @@ class CodeInput(TextInput):
         return Syntax(text, "python", background_color="default")
 
 
+def _common_prefix(strings: list[str]) -> str:
+    """Longest string that all ``strings`` start with. Compared character by character,
+    unlike ``os.path.commonpath``, which only matches whole path components."""
+    low, high = min(strings), max(strings)
+    for i, char in enumerate(low):
+        if char != high[i]:
+            return low[:i]
+    return low
+
+
 def _complete_path(text: str) -> tuple[str, list[str]]:
     """
     Bash-style tab completion of a (partial) file path. ``~`` is expanded, and dotfiles are
@@ -205,7 +215,7 @@ def _complete_path(text: str) -> tuple[str, list[str]]:
     if len(matches) <= 1:
         return (matches[0] if matches else text), []
     head = text[: max(text.rfind("/"), text.rfind(os.sep)) + 1]
-    return os.path.commonprefix(matches), [m[len(head) :] for m in matches]
+    return _common_prefix(matches), [m[len(head) :] for m in matches]
 
 
 class PathInput(TextInput):
