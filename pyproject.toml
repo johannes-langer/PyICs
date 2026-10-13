@@ -1,6 +1,6 @@
 [project]
 name = "pyics"
-version = "0.0.1"
+version = "1.0.0"
 description = "PyICs (Python Interactive Courses) is a modular framework for teaching programming in Python locally, allowing for co-learning of a programming environment."
 readme = "README.md"
 authors = [
