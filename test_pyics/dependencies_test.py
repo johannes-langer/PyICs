@@ -4,8 +4,10 @@ installed, how to install them, which modules its task files may make json_trick
 import, and finding the packages a course uses.
 """
 
+import importlib.metadata
 import json
 import sys
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -52,6 +54,15 @@ def test_requirements_for_other_platforms_are_skipped() -> None:
     )
 
 
+def test_distribution_is_the_published_name() -> None:
+    """pyics is published under another name than its module's, which is what has to
+    be looked up for its version."""
+    pyproject = Path(__file__).parent.parent / "pyproject.toml"
+    project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
+    assert dependencies.DISTRIBUTION == project["name"]
+    assert dependencies.pyics_version() == importlib.metadata.version(project["name"])
+
+
 def test_requires_pyics(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(dependencies, "pyics_version", lambda: "0.3.0")
     assert dependencies.check(requires_pyics=">=0.2") == []
@@ -94,6 +105,7 @@ def test_install_hint() -> None:
     command = dependencies.format_command(dependencies.install_command(["numpy>=1.26"]))
     assert f"Install it with: {command}" in hint
     assert "Upgrade pyics with: " in hint
+    assert hint.endswith(f"-U {dependencies.DISTRIBUTION}")
     assert dependencies.describe(problems) == (
         "numpy>=1.26 (not installed) and pyics>=9 (you have 0.0.1)"
     )

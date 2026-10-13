@@ -34,6 +34,10 @@ from pyics.util import json_handling as json
 # always available to a course: pyics itself, and the standard library
 _ALWAYS_ALLOWED = frozenset({"pyics", *sys.stdlib_module_names})
 
+# the name pyics is published under (e.g. on PyPI), which differs from its module name:
+# what is installed, upgraded and looked up for its version
+DISTRIBUTION = "python-interactive-courses"
+
 
 class MissingDependencyError(ImportError):
     """A task needs a package that isn't installed."""
@@ -47,7 +51,7 @@ class ModuleNotAllowedError(Exception):
 def pyics_version() -> str:
     """The installed version of pyics."""
     try:
-        return importlib.metadata.version("pyics")
+        return importlib.metadata.version(DISTRIBUTION)
     except importlib.metadata.PackageNotFoundError:
         return "0"
 
@@ -171,12 +175,12 @@ def _tool_install_note(requirements: Sequence[str]) -> str | None:
     tool by uv or pipx, which recreate its environment when it is upgraded."""
     parts = [part.lower() for part in Path(sys.prefix).parts]
     if "pipx" in parts and "venvs" in parts:
-        return f"pyics is installed with pipx, so you can also run: pipx inject pyics {' '.join(requirements)}"
+        return f"pyics is installed with pipx, so you can also run: pipx inject {DISTRIBUTION} {' '.join(requirements)}"
     if "tools" in parts and any("uv" in part for part in parts):
         withs = " ".join(f"--with {shlex.quote(r)}" for r in requirements)
         return (
             "pyics is installed as a uv tool: to keep these packages when it is "
-            f"upgraded, reinstall it with: uv tool install pyics {withs}"
+            f"upgraded, reinstall it with: uv tool install {DISTRIBUTION} {withs}"
         )
     return None
 
@@ -193,7 +197,8 @@ def install_hint(problems: Iterable[Problem]) -> str:
             hints.append(note)
     if any(p.requirement.startswith("pyics") and not p.installable for p in problems):
         hints.append(
-            "Upgrade pyics with: " + format_command(install_command(["-U", "pyics"]))
+            "Upgrade pyics with: "
+            + format_command(install_command(["-U", DISTRIBUTION]))
         )
     return " ".join(hints)
 

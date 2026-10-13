@@ -1,4 +1,3 @@
-import importlib.metadata
 import sys
 import threading
 import time
@@ -15,6 +14,8 @@ from rich.progress import BarColumn, Progress, TextColumn
 from rich.segment import Segment
 from rich.table import Table
 from rich.text import Text, TextType
+
+from pyics.distribution import dependencies
 
 # the escape codes not used here are re-exported, as they used to be defined here
 from pyics.util.terminal import (  # noqa: F401
@@ -109,7 +110,7 @@ class CLI:
 
         return Panel(
             table,
-            title=f"[blue]PyICs[white] {importlib.metadata.version('pyics')}",
+            title=f"[blue]PyICs[white] {dependencies.pyics_version()}",
             title_align="left",
             border_style="blue",
             box=box.ROUNDED,
