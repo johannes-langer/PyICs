@@ -433,7 +433,7 @@ wheels = [
 
 [[package]]
 name = "pyics"
-version = "0.0.1"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },
