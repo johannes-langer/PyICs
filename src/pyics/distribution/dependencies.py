@@ -395,6 +395,25 @@ def pip_install_lines(code: str) -> list[tuple[int, str]]:
     ]
 
 
+# the tag of a stored ``GeneralTest`` (see ``json_handling.scan_tags``)
+_GENERAL_TEST = ["pyics.tests.tests", "GeneralTest"]
+# what pyics depends on itself, which the source of a ``GeneralTest`` may import
+_PYICS_DEPENDENCIES = frozenset({"pytest", "_pytest"})
+
+
+def _test_sources(data: Mapping[str, Any]) -> list[str]:
+    """The sources of the ``GeneralTest``s stored in the task data ``data``."""
+    tests = data.get("tests")
+    sources = []
+    for test in tests if isinstance(tests, list) else []:
+        if isinstance(test, dict) and test.get("__instance_type__") == _GENERAL_TEST:
+            attributes = test.get("attributes")
+            source = attributes.get("source") if isinstance(attributes, dict) else None
+            if isinstance(source, str):
+                sources.append(source)
+    return sources
+
+
 def used_modules(
     tasks: Mapping[str, Any], local: Collection[str] = ()
 ) -> dict[str, set[str]]:
@@ -402,8 +421,9 @@ def used_modules(
     The top-level modules besides pyics and the standard library that the task data
     of ``tasks`` (by task file name, as read by ``json_handling.loads_plain``) use: to
     decode the objects stored in them, and imported by their exercise and solution
-    code (of notebooks, by their code cells). Modules of the course itself (``local``)
-    are left out.
+    code (of notebooks, by their code cells) and by the sources of their
+    ``GeneralTest``s, besides pytest. Modules of the course itself (``local``) are
+    left out.
 
     Returns
     -------
@@ -423,6 +443,8 @@ def used_modules(
                 if isinstance(code, str):
                     file = files[i] if i < len(files) else None
                     modules |= imported_modules(_python_code(code, file))
+        for source in _test_sources(data):
+            modules |= imported_modules(source) - _PYICS_DEPENDENCIES
         for module in modules - _ALWAYS_ALLOWED - set(local) - {"__future__"}:
             used.setdefault(module, set()).add(name)
     return used

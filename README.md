@@ -49,7 +49,7 @@ Tasks can have hints (``help`` in the task file), which ``create_task`` and ``ed
 
 When a test fails, <kbd>t</kbd> runs the task's tests again with [snoop](https://github.com/alexmojaki/snoop), which shows below each failed test what your code did: every line that was run, the values of the variables it changed, and the calls it made, with their arguments and return values. This trace mode stays on while you keep saving your exercise file, until <kbd>t</kbd> is pressed again, and it is off again for every other task you move to.
 
-Function tests (``SimpleTest``) trace the call of the tested function, and output tests (``PrintTest``) the run of the whole file. Their authors can turn tracing off for a test by creating it with ``traceable=False``, e.g. so that its arguments aren't revealed. Tests that check the structure or the signatures of your code (``StructureTest``, ``SpecTest``) aren't traced.
+Function tests (``SimpleTest``) trace the calls of the tested functions, output tests (``PrintTest``) the run of the whole file, and pytest tests (``GeneralTest``) the code each test runs. Their authors can turn tracing off for a test by creating it with ``traceable=False``, e.g. so that its arguments aren't revealed. Tests that check the structure or the signatures of your code (``StructureTest``, ``SpecTest``) aren't traced.
 
 #### Jupyter Notebooks
 
@@ -115,13 +115,17 @@ Simple tests are unit tests run on student's code. A ``SimpleTest`` additionally
 - ``expected``: The expected result, i.e. output of the function wrt...
 - ``function_args``: Positional arguments to pass to the function in order to produce the expected output
 - ``function_kwargs``: Keyword arguments to pass to the function in order to produce the expected output
+- ``constructor``: The name of a class (or function) of the exercise file that creates an object, whose methods are then called instead of the module's functions. Its arguments are ``constructor_args`` and ``constructor_kwargs``. Defaults to ``None``.
 - ``traceable``: Whether a detailed trace of the function can be displayed. Defaults to ``True``, can be turned off if the trace would give away too much of the solution (use sparingly).
+- ``isolated``: Whether the test runs in a temporary working directory of its own, which is deleted afterwards, e.g. to clean up files the student's code writes. Defaults to ``False``: tests run in the directory of the exercise file, as students run it, so that relative paths like ``open("edges.csv")`` work. This holds for all tests.
+
+``function_name``, ``function_args``, ``function_kwargs`` and ``expected`` can also be lists, with an item per call, for a sequence of calls, and ``expected`` can be ``Raises(...)`` for a call that must raise an exception. Arguments and expected values can be ``Make(...)``, e.g. ``Make("Graph", edges)``, to create an object of the exercise file while the test runs: objects of classes that the test information file defines can't be stored in a task. Both markers are available from the ``pyics.tests`` module (``from pyics.tests import Make, Raises``), and are in scope when entering values in ``create_task``. See the [``SimpleTest`` documentation](./simple_test.md).
 
 ##### ``SpecTest``
 
 Spec tests are signature checks on the student's code. A ``SpecTest`` additionally expects the following parameters:
 
-- ``symbol_name``: The name of the symbol where the expected signature needs to be located.
+- ``symbol_name``: The name of the symbol where the expected signature needs to be located. It can be dotted, e.g. ``Graph.out_degree`` to check a method of a class.
 - ``expected``: The expected signature. Pass a Type (class) or function/method here. It will be converted to a spec_dict, which can then be serialized and checked against.
 - ``by_type``: If this flag is set to true, check the signature based on type annotations instead of parameter/attribute names. This excludes the ``symbol_name``, which still needs to match.
 
@@ -138,6 +142,15 @@ Print tests can test whether the stdout of students' files match a desired outpu
 - ``expected``: The expected output of the targeted file to stdout. The output of a Python file has to match it, while the output of a notebook only has to contain it (see [Jupyter Notebooks](#jupyter-notebooks)).
 - ``inputs``: A list of inputs to provide to the file in case the running script expects inputs (from the builtin ``input()`` function).
 - ``traceable``: Whether a detailed trace of teh function can be displayed. Defaults to ``True``, can be turned off if the trace would give away too much of the solution (use sparingly).
+- ``isolated``: Whether the file runs in a temporary working directory of its own, which is deleted afterwards. Defaults to ``False``.
+
+##### ``GeneralTest``
+
+General tests are pytest code, for what the other tests can't express. Each test the code defines is a result of its own. A ``GeneralTest`` additionally expects the following parameters:
+
+- ``source``: The pytest code, e.g. read from a file of pytest tests. Its tests can use the fixture ``solution``, the exercise file loaded as a module, and the other fixtures described in the [``GeneralTest`` documentation](./general_test.md).
+- ``traceable``: Whether a detailed trace of the tests can be displayed. Defaults to ``True``.
+- ``isolated``: Whether each test runs in a temporary working directory of its own, which is deleted afterwards. Defaults to ``False``.
 
 #### Distribution
 

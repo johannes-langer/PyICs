@@ -14,6 +14,7 @@ from notebook_helpers import markdown, write_notebook
 from rich.console import Console
 
 from pyics.app.prompts import PromptCancelled, PromptSession
+from pyics.scripts import create_task
 from pyics.scripts.create_task import (
     _INFO_MODULE,
     _TEST_TYPES,
@@ -23,7 +24,15 @@ from pyics.scripts.create_task import (
     _prompt_test,
     _prompt_tests,
 )
-from pyics.tests.tests import PrintTest, SimpleTest, SpecTest, StructureTest
+from pyics.tests.tests import (
+    GeneralTest,
+    Make,
+    PrintTest,
+    Raises,
+    SimpleTest,
+    SpecTest,
+    StructureTest,
+)
 
 DOWN, ENTER, BACKSPACE, CTRL_D = "DOWN", "\r", "\x7f", "\x04"
 
@@ -90,10 +99,12 @@ def test_symbols_from_info_file(tmp_path: Path, ex_files: list[Path]) -> None:
             *_type(str(info)),
             # name, function_name: exact matches
             ENTER,  # file_path: the only exercise file
-            *_type("exp"),  # expected
+            ENTER,  # call functions of the module
             BACKSPACE, BACKSPACE, *_type("args[1:]"),  # function_args, prefilled with []
             ENTER,  # function_kwargs: keep {}
-            ENTER,  # traceable: keep True
+            *_type("exp"),  # expected
+            ENTER,  # add another call: no
+            ENTER, ENTER,  # traceable, isolated: keep True and False
         ],
         ex_files,
     )  # fmt: skip
@@ -104,6 +115,7 @@ def test_symbols_from_info_file(tmp_path: Path, ex_files: list[Path]) -> None:
     assert test.function_args == ["A", "C"]
     assert test.function_kwargs == {}
     assert test.traceable is True
+    assert test.isolated is False
 
 
 def test_missing_info_file_is_asked_again(tmp_path: Path, ex_files: list[Path]) -> None:
@@ -114,7 +126,9 @@ def test_missing_info_file_is_asked_again(tmp_path: Path, ex_files: list[Path]) 
             ENTER,  # reference a file: yes
             *_type(str(tmp_path / "info")),  # no such file...
             *_type(".py"),  # ...fixed, keeping the rejected input
-            ENTER, *_type("exp"), ENTER, ENTER, ENTER,  # file_path, expected, defaults
+            ENTER, ENTER,  # file_path, call functions of the module
+            ENTER, ENTER, *_type("exp"),  # function_args, function_kwargs, expected
+            ENTER, ENTER, ENTER,  # one call, traceable, isolated
         ],
         ex_files,
     )  # fmt: skip
@@ -151,10 +165,12 @@ def test_invalid_expression_is_asked_again(ex_files: list[Path]) -> None:
             DOWN, ENTER,  # reference a file: no
             *_type("t"),  # name
             ENTER,  # file_path
+            ENTER,  # call functions of the module
             *_type("f"),  # function_name
+            ENTER, ENTER,  # function_args, function_kwargs: defaults
             *_type("1 +"),  # expected: syntax error...
             *_type(" 1"),  # ...fixed, keeping the rejected input
-            ENTER, ENTER, ENTER,  # function_args, function_kwargs, traceable: defaults
+            ENTER, ENTER, ENTER,  # one call, traceable, isolated: defaults
         ],
         ex_files,
     )  # fmt: skip
@@ -170,8 +186,10 @@ def test_unusable_match_is_prompted_for(tmp_path: Path, ex_files: list[Path]) ->
             *_type(str(info)),
             # name isn't a str: enter text instead of picking the str 'function_name'
             DOWN, ENTER, *_type("n"),
-            ENTER,  # file_path
-            ENTER, ENTER, ENTER,  # function_args, function_kwargs, traceable: defaults
+            ENTER, ENTER,  # file_path, call functions of the module
+            # function_name, expected: exact matches
+            ENTER, ENTER,  # function_args, function_kwargs: defaults
+            ENTER, ENTER, ENTER,  # one call, traceable, isolated: defaults
         ],
         ex_files,
     )  # fmt: skip
@@ -184,9 +202,11 @@ def test_without_info_file(ex_files: list[Path]) -> None:
             DOWN, ENTER,  # reference a file: no
             *_type("t"),  # name
             ENTER,  # file_path
+            ENTER,  # call functions of the module
             *_type("f"),  # function_name
+            ENTER, ENTER,  # function_args, function_kwargs: defaults
             *_type("1"),  # expected
-            ENTER, ENTER, ENTER,  # function_args, function_kwargs, traceable: defaults
+            ENTER, ENTER, ENTER,  # one call, traceable, isolated: defaults
         ],
         ex_files,
     )  # fmt: skip
@@ -199,11 +219,14 @@ def test_traceable_must_be_a_bool(ex_files: list[Path]) -> None:
     test = _run(
         [
             DOWN, ENTER,  # reference a file: no
-            *_type("t"), ENTER, *_type("f"),  # name, file_path, function_name
-            *_type("1"),  # expected
+            *_type("t"), ENTER, ENTER,  # name, file_path, call functions
+            *_type("f"),  # function_name
             ENTER, ENTER,  # function_args, function_kwargs: keep defaults
+            *_type("1"),  # expected
+            ENTER,  # add another call: no
             *[BACKSPACE] * len("True"), *_type("1"),  # traceable: not a bool...
             BACKSPACE, *_type("False"),  # ...fixed
+            ENTER,  # isolated: keep False
         ],
         ex_files,
     )  # fmt: skip
@@ -283,7 +306,7 @@ def test_print_test_expected_output_spans_lines(ex_files: list[Path]) -> None:
             ENTER,  # file_path
             *"Name: Bob", ENTER, *"Hello, Bob!", CTRL_D,  # expected: enter adds a line
             BACKSPACE, BACKSPACE, *_type('["Bob"]'),  # inputs, prefilled with []
-            ENTER,  # traceable: keep True
+            ENTER, ENTER,  # traceable, isolated: keep True and False
         ],
         ex_files,
     )  # fmt: skip
@@ -300,7 +323,7 @@ def test_print_test_from_info_file(tmp_path: Path, ex_files: list[Path]) -> None
         [
             ENTER, *_type(str(info)),  # reference the info file
             ENTER,  # file_path; name, expected, inputs: exact matches
-            ENTER,  # traceable: keep True
+            ENTER, ENTER,  # traceable, isolated: keep True and False
         ],
         ex_files,
     )  # fmt: skip
@@ -320,7 +343,7 @@ def test_print_test_inputs_must_be_strings_in_a_list(
             CTRL_D,  # expected: no output
             BACKSPACE, BACKSPACE, *_type(rejected),  # inputs...
             *[BACKSPACE] * len(rejected), *_type('["Bob"]'),  # ...fixed
-            ENTER,  # traceable: keep True
+            ENTER, ENTER,  # traceable, isolated: keep True and False
         ],
         ex_files,
     )  # fmt: skip
@@ -332,7 +355,7 @@ def test_print_test_is_offered(ex_files: list[Path]) -> None:
         [
             *[DOWN] * _TEST_TYPES.index(PrintTest), ENTER,  # PrintTest
             DOWN, ENTER, *_type("t"), ENTER,  # no info file, name, file_path
-            CTRL_D, ENTER, ENTER,  # expected: no output, inputs and traceable: keep
+            CTRL_D, ENTER, ENTER, ENTER,  # no output; keep inputs, traceable, isolated
             *[DOWN] * len(_TEST_TYPES), ENTER,  # done
         ],
         lambda s: _prompt_tests(s, ex_files),
@@ -414,3 +437,366 @@ def test_spec_from_a_solution_notebook(tmp_path: Path, ex_files: list[Path]) -> 
     console = Console(width=200, record=True, file=io.StringIO())
     console.print(by_type)
     assert CELL_5_RAISED in console.export_text()
+
+
+# --- SimpleTests of objects, and sequences of calls ---
+
+UP, ESC = "UP", "\x1b"
+
+
+def _clear(text: str) -> list[str]:
+    return [BACKSPACE] * len(text)
+
+
+def test_method_sequence(ex_files: list[Path]) -> None:
+    test = _run(
+        [
+            DOWN, ENTER,  # reference a file: no
+            *_type("stack"),  # name
+            ENTER,  # file_path
+            DOWN, ENTER,  # create an object and call its methods
+            *_type("Stack"),  # constructor
+            ENTER, ENTER,  # constructor_args, constructor_kwargs: none
+            *_type("push"), *_clear("[]"), *_type("[1]"), ENTER, *_type("None"),
+            UP, ENTER,  # add another call: yes
+            ENTER, ENTER, ENTER, ENTER,  # the same call again, prefilled
+            UP, ENTER,  # add another call: yes
+            *_clear("push"), *_type("pop"), *_clear("[1]"), *_type("[]"), ENTER,
+            *_clear("None"), *_type("1"),  # expected
+            ENTER,  # add another call: no
+            ENTER,  # traceable: keep True
+            *_clear("False"), *_type("True"),  # isolated
+        ],
+        ex_files,
+    )  # fmt: skip
+    assert test.constructor == "Stack"
+    assert (test.constructor_args, test.constructor_kwargs) == ([], {})
+    assert test.function_name == ["push", "push", "pop"]
+    assert test.function_args == [[1], [1], []]
+    assert test.function_kwargs == [{}, {}, {}]
+    assert test.expected == [None, None, 1]
+    assert test.isolated is True
+
+
+def test_edit_method_sequence(ex_files: list[Path]) -> None:
+    current = SimpleTest(
+        "stack",
+        ex_files[0],
+        ["push", "push", "pop"],
+        [None, None, 1],
+        function_args=[[1], [1], []],
+        constructor="Stack",
+        isolated=True,
+    )
+    cli = MagicMock()
+    q: queue.Queue[str] = queue.Queue()
+    keys = [
+        ENTER,  # reference a file with test information: no, when editing
+        ENTER, ENTER, ENTER,  # name, file_path, object: keep
+        ENTER, ENTER, ENTER,  # constructor and its arguments: keep
+        ENTER, ENTER, ENTER, ENTER, ENTER,  # call 1, another call: yes, preselected
+        ENTER, ENTER, ENTER, ENTER, ENTER,  # call 2, another call: yes, preselected
+        ENTER, ENTER, ENTER, *_clear("1"), *_type("2"),  # call 3: expect 2
+        UP, ENTER,  # add another call: yes, prefilled with call 3
+        ENTER, ENTER, ENTER, *_clear("2"), *_type("Raises(IndexError)"),
+        ENTER,  # add another call: no
+        ENTER, ENTER,  # traceable, isolated: keep
+    ]  # fmt: skip
+    for key in [*keys, "\x03"]:
+        q.put(key)
+    test = PromptSession(cli, q).run(
+        lambda s: _prompt_test(s, SimpleTest, ex_files, current=current)
+    )
+    assert q.get_nowait() == "\x03", "all keys were used"
+    assert isinstance(test, SimpleTest)
+    assert test.function_name == ["push", "push", "pop", "pop"]
+    assert test.expected == [None, None, 2, Raises("IndexError")]
+    assert (test.constructor, test.isolated) == ("Stack", True)
+
+    # the expected exception is named in the details of the prompt
+    calls = cli.update_main_content.call_args_list
+    title = "call 4: expected"
+    prompt = next(c.args[0] for c in reversed(calls) if c.kwargs["title"] == title)
+    console = Console(width=200, record=True, file=io.StringIO())
+    console.print(prompt)
+    assert "Raises(ValueError) expects the call to raise" in console.export_text()
+
+
+def test_a_single_call_is_stored_as_before(ex_files: list[Path]) -> None:
+    test = _run(
+        [
+            DOWN, ENTER, *_type("t"), ENTER, ENTER,  # name, file_path, module
+            *_type("f"), ENTER, ENTER, *_type("Raises(ValueError)"),  # one call
+            ENTER, ENTER, ENTER,  # one call, traceable, isolated
+        ],
+        ex_files,
+    )  # fmt: skip
+    assert (test.function_name, test.expected) == ("f", Raises("ValueError"))
+    assert "isolated" not in vars(test)
+
+
+def test_constructors_are_offered_from_the_info_file(
+    tmp_path: Path, ex_files: list[Path]
+) -> None:
+    info = tmp_path / "info.py"
+    info.write_text("class Stack:\n    pass\n\ndef helper():\n    pass\n")
+    test = _run(
+        [
+            ENTER, *_type(str(info)),  # reference the info file
+            *_type("t"), ENTER, DOWN, ENTER,  # name, file_path, object
+            ENTER,  # constructor: Stack, the first class or function
+            ENTER, ENTER,  # constructor_args, constructor_kwargs
+            *_type("pop"), ENTER, ENTER, *_type("None"),  # one call
+            ENTER, ENTER, ENTER,  # one call, traceable, isolated
+        ],
+        ex_files,
+    )  # fmt: skip
+    assert test.constructor == "Stack"
+
+
+GRAPH_INFO = """
+class Graph:
+    def __init__(self, edges):
+        self.edges = edges
+
+edges = [("A", "B")]
+g = Graph(edges)
+"""
+
+
+def _texts(cli: MagicMock, method: str) -> str:
+    """Everything ``cli.<method>`` was called with, as plain text."""
+    console = Console(width=300, record=True, file=io.StringIO())
+    for call in getattr(cli, method).call_args_list:
+        console.print(call.args[0])
+    return console.export_text()
+
+
+def test_objects_of_the_info_file_are_rejected_for_make(
+    tmp_path: Path, ex_files: list[Path]
+) -> None:
+    info = tmp_path / "info.py"
+    info.write_text(GRAPH_INFO)
+    cli = MagicMock()
+    q: queue.Queue[str] = queue.Queue()
+    keys = [
+        ENTER, *_type(str(info)),  # reference the info file
+        *_type("t"), ENTER, ENTER, *_type("degree"),  # name, file_path, module, name
+        *_clear("[]"), *_type('[g, "A"]'),  # function_args: rejected, kept
+        *_clear('[g, "A"]'), *_type('[Make("Graph", edges), "A"]'),
+        ENTER, *_type("1"),  # function_kwargs, expected
+        ENTER, ENTER, ENTER,  # one call, traceable, isolated
+    ]  # fmt: skip
+    for key in [*keys, "\x03"]:
+        q.put(key)
+    test = PromptSession(cli, q).run(lambda s: _prompt_test(s, SimpleTest, ex_files))
+    assert q.get_nowait() == "\x03", "all keys were used"
+    assert isinstance(test, SimpleTest)
+    assert test.function_args == [Make("Graph", [("A", "B")]), "A"]
+    info_text = " ".join(_texts(cli, "update_info").split())
+    assert "holds a Graph of the test information file" in info_text
+    assert "use Make('Graph', ...) instead" in info_text
+
+
+def test_make_values_are_prefilled_as_code(ex_files: list[Path]) -> None:
+    current = SimpleTest(
+        "t", ex_files[0], "degree", 1, function_args=[Make("Graph", [("A", "B")]), "A"]
+    )
+    cli = MagicMock()
+    q: queue.Queue[str] = queue.Queue()
+    keys = [ENTER] * 11  # no info file, then keep everything
+    for key in [*keys, "\x03"]:
+        q.put(key)
+    test = PromptSession(cli, q).run(
+        lambda s: _prompt_test(s, SimpleTest, ex_files, current=current)
+    )
+    assert q.get_nowait() == "\x03", "all keys were used"
+    assert isinstance(test, SimpleTest)
+    assert test.function_args == current.function_args
+    assert "[Make('Graph', [('A', 'B')]), 'A']" in _texts(cli, "update_main_content")
+
+
+# --- GeneralTests ---
+
+GENERAL_SOURCE = """def test_add(solution):
+    assert solution.add(1, 2) == 3
+"""
+
+GENERAL_SOLUTION = "def add(a, b):\n    return a + b\n"
+
+
+def _run_general(
+    keys: list[str], ex_files: list[Path], sol_files: list[Path]
+) -> tuple[GeneralTest | None, MagicMock]:
+    q: queue.Queue[str] = queue.Queue()
+    for key in [*keys, "\x03"]:
+        q.put(key)
+    cli = MagicMock()
+    test = PromptSession(cli, q).run(
+        lambda s: _prompt_test(s, GeneralTest, ex_files, sol_files=sol_files)
+    )
+    assert q.get_nowait() == "\x03", "all keys were used"
+    assert test is None or isinstance(test, GeneralTest)
+    return test, cli
+
+
+def _titles(cli: MagicMock) -> list[str]:
+    return [c.kwargs["title"] for c in cli.update_main_content.call_args_list]
+
+
+@pytest.fixture
+def solution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.chdir(tmp_path)  # pytest writes its cache to the working directory
+    path = tmp_path / "sol.py"
+    path.write_text(GENERAL_SOLUTION)
+    return path
+
+
+def test_general_test_from_a_file(
+    tmp_path: Path, ex_files: list[Path], solution: Path
+) -> None:
+    source = tmp_path / "test_add.py"
+    source.write_text(GENERAL_SOURCE)
+    (tmp_path / "no_tests.py").write_text("x = 1\n")
+    test, cli = _run_general(
+        [
+            DOWN, ENTER, *_type("general"), ENTER,  # no info file, name, file_path
+            ENTER,  # source: from a file
+            *_type(str(tmp_path / "no_tests.py")),  # defines no tests...
+            *_clear("no_tests.py"), *_type("test_add.py"),  # ...fixed
+            ENTER, ENTER,  # traceable, isolated: keep
+            ENTER,  # checked on the only solution file: keep
+        ],
+        ex_files,
+        [solution],
+    )  # fmt: skip
+    assert test is not None
+    assert test.source == GENERAL_SOURCE
+    assert f"Checked on {solution}: 1 passed, 0 failed" in _titles(cli)
+
+
+def test_general_test_typed_in(ex_files: list[Path], solution: Path) -> None:
+    test, _ = _run_general(
+        [
+            DOWN, ENTER, *_type("general"), ENTER,
+            DOWN, ENTER,  # source: type it
+            *"def test_add(solution):", ENTER,
+            *"    assert solution.add(1, 2) == 3", CTRL_D,
+            ENTER, ENTER, ENTER,  # traceable, isolated, keep
+        ],
+        ex_files,
+        [solution],
+    )  # fmt: skip
+    assert test is not None
+    assert test.source == GENERAL_SOURCE.rstrip("\n")
+
+
+def test_general_test_is_checked_against_the_solution(
+    tmp_path: Path, ex_files: list[Path], solution: Path
+) -> None:
+    failing = GENERAL_SOURCE + (
+        "\ndef test_wrong(solution):\n    assert solution.add(1, 1) == 3\n"
+    )
+    (tmp_path / "failing.py").write_text(failing)
+    (tmp_path / "fixed.py").write_text(GENERAL_SOURCE)
+    test, cli = _run_general(
+        [
+            DOWN, ENTER, *_type("general"), ENTER,
+            ENTER, *_type(str(tmp_path / "failing.py")),  # source: from a file
+            ENTER, ENTER,  # traceable, isolated
+            DOWN, ENTER,  # one test fails: edit again
+            UP, ENTER, *_type(str(tmp_path / "fixed.py")),  # from another file
+            ENTER,  # keep
+        ],
+        ex_files,
+        [solution],
+    )  # fmt: skip
+    assert test is not None
+    assert test.source == GENERAL_SOURCE
+    titles = _titles(cli)
+    assert f"Checked on {solution}: 1 passed, 1 failed" in titles
+    assert f"Checked on {solution}: 1 passed, 0 failed" in titles
+    # the failures are shown below the choice
+    prompt = next(
+        c.args[0]
+        for c in cli.update_main_content.call_args_list
+        if c.kwargs["title"].endswith("1 failed")
+    )
+    console = Console(width=200, record=True, file=io.StringIO())
+    console.print(prompt)
+    shown = console.export_text()
+    assert "::general::test_wrong failed" in shown
+    assert "assert 2 == 3" in shown
+
+    discarded, _ = _run_general(
+        [
+            DOWN, ENTER, *_type("general"), ENTER,
+            ENTER, *_type(str(tmp_path / "failing.py")), ENTER, ENTER,
+            DOWN, DOWN, ENTER,  # discard
+        ],
+        ex_files,
+        [solution],
+    )  # fmt: skip
+    assert discarded is None
+
+
+def test_checks_are_cached_while_flows_are_replayed(
+    tmp_path: Path,
+    ex_files: list[Path],
+    solution: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runs: list[object] = []
+    real = create_task.run_tests
+
+    def counted(*args: object, **kwargs: object):
+        runs.append(args)
+        return real(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(create_task, "run_tests", counted)
+    (tmp_path / "cached.py").write_text(GENERAL_SOURCE.replace("1, 2", "2, 1"))
+    _run_general(
+        [
+            DOWN, ENTER, *_type("cached"), ENTER,
+            ENTER, *_type(str(tmp_path / "cached.py")), ENTER, ENTER,
+            ESC, ENTER,  # back to isolated, and on again: replayed
+            ENTER,  # keep
+        ],
+        ex_files,
+        [solution],
+    )  # fmt: skip
+    assert len(runs) == 1
+
+    solution.write_text(GENERAL_SOLUTION + "\n")  # changed: checked again
+    _run_general(
+        [
+            DOWN, ENTER, *_type("cached"), ENTER,
+            ENTER, *_type(str(tmp_path / "cached.py")), ENTER, ENTER, ENTER,
+        ],
+        ex_files,
+        [solution],
+    )  # fmt: skip
+    assert len(runs) == 2
+
+
+def test_the_solution_with_the_exercise_files_name_is_chosen(
+    tmp_path: Path, ex_files: list[Path], solution: Path
+) -> None:
+    (tmp_path / "solutions").mkdir()
+    same_name = tmp_path / "solutions" / ex_files[0].name
+    same_name.write_text(GENERAL_SOLUTION)
+    (tmp_path / "test_add.py").write_text(GENERAL_SOURCE)
+    keys = [
+        DOWN, ENTER, *_type("general"), ENTER,
+        ENTER, *_type(str(tmp_path / "test_add.py")), ENTER, ENTER,
+    ]  # fmt: skip
+    _, cli = _run_general([*keys, ENTER], ex_files, [solution, same_name])
+    assert f"Checked on {same_name}: 1 passed, 0 failed" in _titles(cli)
+
+    # otherwise, it is asked for, and the check can be skipped
+    test, cli = _run_general(
+        [*keys, DOWN, DOWN, ENTER], ex_files, [solution, tmp_path / "test_add.py"]
+    )
+    assert test is not None
+    assert "Solution file to check the test against" in _titles(cli)
+    assert not any(t.startswith("Checked on") for t in _titles(cli))

@@ -7,6 +7,7 @@ import re
 import sys
 from collections import deque
 from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import CodeType
 
@@ -119,11 +120,18 @@ class Trace:
 
     def run[T](self, call: Callable[[], T]) -> T:
         """Return ``call()``, tracing the watched code it runs."""
+        with self.active():
+            return call()
+
+    @contextmanager
+    def active(self) -> Generator[None]:
+        """Trace the watched code that is run in this context, by the calling thread
+        (see ``run``)."""
         self._config.thread_local.__dict__.setdefault("depth", -1)
         previous = sys.gettrace()
         sys.settrace(self._tracer.trace)
         try:
-            return call()
+            yield
         finally:
             sys.settrace(previous)
             self._lines.flush()

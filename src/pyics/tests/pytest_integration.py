@@ -1,8 +1,8 @@
 import dataclasses
-from collections.abc import Mapping
+import threading
+from collections.abc import Mapping, Sequence
 from os import PathLike
 from pathlib import Path
-from types import MappingProxyType
 from typing import Literal
 
 import pytest
@@ -15,12 +15,38 @@ from rich.style import Style
 from rich.text import Text
 
 from pyics.notebook import loader
-from pyics.tests import Test
+from pyics.tests import Test, general
+from pyics.tests.general import absolute_sections
 from pyics.tests.results import TestResult
-from pyics.tests.tests import TASK_SECTIONS, MarkupAssertionError
+from pyics.tests.tests import TASK_SECTIONS, GeneralTest, MarkupAssertionError
 from pyics.tests.trace import Trace, ansi_text
-from pyics.util import paths
+from pyics.util import terminal
 from pyics.util.paths import StrPath
+
+# pytest runs aren't thread-safe (e.g. the tests import the exercise file as the module
+# ``current_solution``), so all runs are serialized (see ``run_tests``)
+_pytest_lock = threading.Lock()
+
+# the position of an item's test in the tests that are run (see ``TestResult.index``)
+INDEX_KEY = pytest.StashKey[int | None]()
+
+
+def trace_ansi(test: Test, *, tracing: bool, trace: Trace | None) -> str | None:
+    """
+    The trace of a failed ``test``, or why there is none (dimmed), if it ran with
+    ``tracing``, as text with ANSI escape codes (see ``Trace.ansi``): ``trace``, the
+    trace that was recorded, if the test could be traced.
+    """
+    if not tracing:
+        return None
+    dim = Style(dim=True).render
+    if not test.supports_trace:
+        return dim(f"{type(test).__name__}s can't be traced.")
+    if not getattr(test, "traceable", True):
+        return dim("Tracing is turned off for this test.")
+    if trace is None or not (ansi := trace.ansi):
+        return dim("Nothing was traced: the test failed before running your code.")
+    return ansi
 
 
 @dataclasses.dataclass(eq=False)
@@ -68,9 +94,7 @@ class PyicsItem(pytest.Item):
         self.tracing = tracing
         # the sections of its task, which it inherits while it runs (see
         # ``TASK_SECTIONS``)
-        self.sections: Mapping[Path, str] = MappingProxyType(
-            {paths.absolute(path): name for path, name in (sections or {}).items()}
-        )
+        self.sections: Mapping[Path, str] = absolute_sections(sections)
         self.recorded_trace: Trace | None = None
         # the errors in the cells of a notebook the test ran, named if it fails
         self.cell_errors: list[loader.CellError] = []
@@ -116,23 +140,55 @@ class PyicsItem(pytest.Item):
 
     def _trace_ansi(self) -> str | None:
         """The trace of the failed test, or why there is none (dimmed), if it is
-        traced, as text with ANSI escape codes (see ``Trace.ansi``)."""
-        if not self.tracing:
-            return None
-        dim = Style(dim=True).render
-        if not self.test_obj.supports_trace:
-            return dim(f"{type(self.test_obj).__name__}s can't be traced.")
-        if not getattr(self.test_obj, "traceable", True):
-            return dim("Tracing is turned off for this test.")
-        assert self.recorded_trace is not None
-        if not (trace := self.recorded_trace.ansi):
-            return dim(
-                "Nothing was traced: the test failed before running your code."
-            )
-        return trace
+        traced (see ``trace_ansi``)."""
+        return trace_ansi(
+            self.test_obj, tracing=self.tracing, trace=self.recorded_trace
+        )
 
     def reportinfo(self) -> tuple[PathLike | str, int | None, str]:
         return self.path, 0, f"pyics test: {self.name}"
+
+
+def items_for(
+    session: pytest.Session,
+    test: Test,
+    index: int | None,
+    *,
+    tracing: bool = False,
+    sections: Mapping[StrPath, str] | None = None,
+) -> list[pytest.Item]:
+    """
+    The items that run ``test`` in ``session``: a ``PyicsItem``, or for a
+    ``GeneralTest``, the items of the tests its source defines (see
+    ``general.collect_general_test``), which all share its ``index``, the position of
+    the test in the tests that are run. ``tracing`` and ``sections`` are passed on to
+    the items (see ``PyicsItem``).
+    """
+    if isinstance(test, GeneralTest):
+        items = general.collect_general_test(
+            session, test, index, tracing=tracing, sections=sections
+        )
+    else:
+        items = [
+            PyicsItem.from_parent(
+                session, name="", test_obj=test, tracing=tracing, sections=sections
+            )
+        ]
+    for item in items:
+        item.stash[INDEX_KEY] = index
+    return items
+
+
+def _merge_failure(call: TestResult, teardown: TestResult) -> TestResult:
+    """The ``call`` result of a test whose ``teardown`` failed, which fails it."""
+    messages = [m for m in (call.message, teardown.message) if m]
+    return dataclasses.replace(
+        call,
+        outcome="failed",
+        message="\n".join(messages) or None,
+        trace=call.trace if call.trace is not None else teardown.trace,
+        duration=call.duration + teardown.duration,
+    )
 
 
 class LiveTestCollectionPlugin:
@@ -169,36 +225,52 @@ class LiveTestCollectionPlugin:
         # the reports as results that can cross a process boundary, with the position
         # of their test in ``test_objs``
         self.results: list[TestResult] = []
-        self._indices: dict[int, int] = {}
         self._index: int | None = None
+        # the position in ``results`` of the call result of the test that is running
+        self._call_result: int | None = None
+
+    def pytest_configure(self, config: pytest.Config) -> None:
+        general.register(config)
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_collection(self, session: pytest.Session):
         session.items = [
-            PyicsItem.from_parent(
-                session,
-                name="",
-                test_obj=obj,
-                tracing=self.tracing,
-                sections=self.sections,
+            item
+            for i, obj in enumerate(self.test_objs)
+            for item in items_for(
+                session, obj, i, tracing=self.tracing, sections=self.sections
             )
-            for obj in self.test_objs
         ]
         session.testscollected = len(session.items)
-        # by identity, since tests can share their name, and with it their nodeid
-        self._indices = {id(item): i for i, item in enumerate(session.items)}
-        return (
-            True  # @Claude: "short-circuits the default collection, no files are touched"
-        )
+        return True  # short-circuits the default collection, no files are touched
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_runtest_protocol(self, item: pytest.Item, nextitem: pytest.Item | None):
         # the reports logged until the next test starts are this test's
-        self._index = self._indices.get(id(item))
+        self._index = item.stash.get(INDEX_KEY, None)
+        self._call_result = None
 
-    def pytest_runtest_logreport(self, report):
+    def pytest_runtest_logreport(self, report: TestReport) -> None:
+        """
+        Record the result of each phase of a test, such that exactly one result of
+        each test is its call's, which is what counts (see ``Task.update_status``): a
+        setup that fails or is skipped (e.g. as the exercise file raises while a
+        fixture loads it) counts as the call, which doesn't run then, and a teardown
+        that fails fails the call, so that no broken test goes missing.
+        """
         self.reports.append(report)
-        self.results.append(TestResult.from_report(report, self._index))
+        result = TestResult.from_report(report, self._index)
+        if report.when == "setup" and not report.passed:
+            result = dataclasses.replace(result, when="call")
+        elif report.when == "teardown" and report.failed:
+            if self._call_result is not None:
+                position = self._call_result
+                self.results[position] = _merge_failure(self.results[position], result)
+                return
+            result = dataclasses.replace(result, when="call")
+        if result.when == "call":
+            self._call_result = len(self.results)
+        self.results.append(result)
 
 
 class NotebookCollectionPlugin:
@@ -213,16 +285,35 @@ class NotebookCollectionPlugin:
         self.tracing = tracing
         self.reports = []
 
+    def pytest_configure(self, config: pytest.Config) -> None:
+        general.register(config)
+
     @pytest.hookimpl(tryfirst=True)
     def pytest_collection(self, session):
         session.items = [
-            PyicsItem.from_parent(
-                session, name=f"test_{i}", test_obj=obj, tracing=self.tracing
-            )
+            item
             for i, obj in enumerate(self.test_objs)
+            for item in items_for(session, obj, i, tracing=self.tracing)
         ]
         session.testscollected = len(session.items)
         return True  # short-circuits the default collection, no files are touched
 
     def pytest_runtest_logreport(self, report):
         self.reports.append(report)
+
+
+def run_tests(
+    tests: Sequence[Test],
+    *,
+    tracing: bool = False,
+    sections: Mapping[StrPath, str] | None = None,
+) -> list[TestResult]:
+    """
+    Run ``tests`` through pytest, as a task runs its tests, and return their results
+    (see ``LiveTestCollectionPlugin``). Runs are serialized, and the terminal's mode is
+    restored afterwards. ``tracing`` and ``sections`` are passed on to the plugin.
+    """
+    plugin = LiveTestCollectionPlugin(list(tests), tracing=tracing, sections=sections)
+    with _pytest_lock, terminal.preserve_terminal_mode():
+        pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
+    return plugin.results

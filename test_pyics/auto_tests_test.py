@@ -15,7 +15,14 @@ from rich.console import Console
 import pyics.util.json_handling as json
 from pyics.data import Task
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin
-from pyics.tests.tests import MarkupAssertionError, PrintTest, SimpleTest, SpecTest
+from pyics.tests.tests import (
+    Make,
+    MarkupAssertionError,
+    PrintTest,
+    Raises,
+    SimpleTest,
+    SpecTest,
+)
 
 SOLUTION = """
 def add(a, b=0):
@@ -208,6 +215,429 @@ def test_numpy_arrays_are_compared_as_a_whole(tmp_path: Path, stored: bool) -> N
         "Values differ at 1 of 2 positions:",
         "At index 1 diff: 4 != 0",
     ]
+
+
+# --- SimpleTest: sequences of calls, objects and exceptions ---
+
+STATEFUL = """
+class Stack:
+    def __init__(self, items=()):
+        self.items = list(items)
+
+    @classmethod
+    def from_list(cls, items):
+        return cls(items)
+
+    def push(self, item):
+        self.items.append(item)
+
+    def pop(self):
+        return self.items.pop()
+
+    @property
+    def size(self):
+        return len(self.items)
+
+
+class Account:
+    def __init__(self, balance):
+        if balance < 0:
+            raise ValueError("negative balance")
+        self.balance = balance
+
+    def withdraw(self, amount):
+        if amount > self.balance:
+            raise InsufficientFunds(amount)
+        self.balance -= amount
+
+
+class InsufficientFunds(Exception):
+    pass
+
+
+account = Account(10)
+counter = 0
+
+
+def count():
+    global counter
+    counter += 1
+    return counter
+
+
+def add_item(item, items=[]):
+    items.append(item)
+    return items
+"""
+
+
+@pytest.fixture
+def stateful(tmp_path: Path) -> Path:
+    path = tmp_path / "stateful.py"
+    path.write_text(STATEFUL)
+    return path
+
+
+def _failure(test: SimpleTest) -> list[str]:
+    with pytest.raises(AssertionError) as excinfo:
+        test.run()
+    return str(excinfo.value).splitlines()
+
+
+def test_stored_single_calls_still_run(stateful: Path) -> None:
+    """Tests stored before sequences, objects and isolation have none of their
+    attributes, which the class provides."""
+    stored = {
+        "__instance_type__": ["pyics.tests.tests", "SimpleTest"],
+        "attributes": {
+            "name": "t",
+            "file_path": str(stateful),
+            "function_name": "add_item",
+            "function_args": [1],
+            "function_kwargs": {},
+            "expected": [1],
+        },
+    }
+    test = json.loads(json.dumps(stored))
+    assert isinstance(test, SimpleTest)
+    assert (test.constructor, test.isolated) == (None, False)
+    test.run()
+    # a single call is stored as before, without the new attributes
+    assert "constructor" not in vars(SimpleTest("t", stateful, "count", 1))
+
+
+def test_sequences_and_objects_survive_a_json_round_trip(stateful: Path) -> None:
+    test = SimpleTest(
+        "t",
+        stateful,
+        ["push", "size", "pop", "pop"],
+        [None, 1, (2, 3), Raises(IndexError)],
+        function_args=[[(2, 3)], [], [], []],
+        constructor="Stack",
+        constructor_args=[[]],
+        isolated=True,
+    )
+    loaded = json.loads(test.serialize())
+    assert isinstance(loaded, SimpleTest)
+    assert vars(loaded) == vars(test)
+    assert isinstance(loaded.expected[2], tuple)
+    assert loaded.expected[3] == Raises("IndexError")
+    loaded.run()
+
+
+def test_calls_run_in_succession_on_the_module(stateful: Path) -> None:
+    SimpleTest("t", stateful, ["count", "count", "count"], [1, 2, 3]).run()
+
+
+def test_the_failing_call_is_shown_after_the_calls_before(stateful: Path) -> None:
+    test = SimpleTest("t", stateful, ["count", "count", "count"], [1, 2, 4])
+    assert _failure(test)[:4] == [
+        "count() -> 1",
+        "count() -> 2",
+        "count() returned 3, expected 4",
+        "3 == 4",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"function_name": ["count", "count"], "expected": [1]}, "expected must be"),
+        (
+            {"function_name": ["count"], "expected": [1], "function_args": [[], []]},
+            "function_args must be",
+        ),
+        (
+            {"function_name": ["count"], "expected": [1], "function_kwargs": [1]},
+            "function_kwargs must be",
+        ),
+        ({"function_name": ["count", 1], "expected": [1, 2]}, "must be str"),
+        ({"function_name": [], "expected": []}, "non-empty list"),
+        ({"function_name": "count", "expected": 1, "constructor_args": [1]}, "need a"),
+    ],
+)
+def test_malformed_sequences_are_rejected(
+    stateful: Path, kwargs: dict, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        SimpleTest("t", stateful, **kwargs)
+
+
+def test_methods_of_an_object(stateful: Path) -> None:
+    SimpleTest(
+        "t",
+        stateful,
+        ["push", "push", "pop", "pop"],
+        [None, None, 2, 1],
+        function_args=[[1], [2], [], []],
+        constructor="Stack",
+    ).run()
+
+    wrong = SimpleTest(
+        "t",
+        stateful,
+        ["push", "pop"],
+        [None, 2],
+        function_args=[[1], []],
+        constructor="Stack",
+    )
+    assert _failure(wrong)[:3] == [
+        "Stack()",
+        ".push(1) -> None",
+        ".pop() returned 1, expected 2",
+    ]
+
+
+def test_dotted_names_and_attributes(stateful: Path) -> None:
+    # a module-level object's method, and its attribute compared as a value
+    SimpleTest(
+        "t",
+        stateful,
+        ["account.withdraw", "account.balance"],
+        [None, 7],
+        function_args=[[3], []],
+    ).run()
+    # a class method as the constructor, and a property compared as a value
+    SimpleTest(
+        "t", stateful, ["push", "size"], [None, 1], function_args=[[1], []],
+        constructor="Stack.from_list", constructor_args=[[]],
+    ).run()  # fmt: skip
+    size = r"^Stack\(\)\n\.size returned 0, expected 1"
+    with pytest.raises(AssertionError, match=size):
+        SimpleTest("t", stateful, "size", 1, constructor="Stack").run()
+    with pytest.raises(AssertionError, match="balance is not callable"):
+        SimpleTest(
+            "t", stateful, ["account.balance", "count"], [10, 1],
+            function_args=[[1], []],
+        ).run()  # fmt: skip
+
+
+def test_a_function_that_keeps_state_gets_a_hint(stateful: Path) -> None:
+    test = SimpleTest(
+        "t", stateful, ["add_item", "add_item"], [[1], [1]], function_args=[[1], [1]]
+    )
+    lines = _failure(test)
+    assert lines[:2] == [
+        "add_item(1) -> [1]",
+        "add_item(1) returned [1, 1], expected [1]",
+    ]
+    assert "the function keeps state between calls" in lines[-1]
+
+    # different calls get no hint
+    test = SimpleTest(
+        "t", stateful, ["add_item", "add_item"], [[1], [2]], function_args=[[1], [2]]
+    )
+    assert "keeps state" not in "\n".join(_failure(test))
+
+
+def test_expected_exceptions(stateful: Path) -> None:
+    # a builtin exception, and one the exercise file defines
+    SimpleTest("t", stateful, ["pop"], [Raises(IndexError)], constructor="Stack").run()
+    SimpleTest(
+        "t", stateful, ["withdraw", "balance"], [Raises("InsufficientFunds"), 1],
+        function_args=[[2], []], constructor="Account", constructor_args=[1],
+    ).run()  # fmt: skip
+    # a subclass counts, too
+    SimpleTest("t", stateful, ["pop"], [Raises(LookupError)], constructor="Stack").run()
+
+
+def test_a_constructor_that_must_raise(stateful: Path) -> None:
+    SimpleTest("t", stateful, "Account", Raises(ValueError), function_args=[-1]).run()
+    with pytest.raises(
+        AssertionError,
+        match=r"^expected Account\(1\) to raise ValueError, but it returned <",
+    ):
+        SimpleTest(
+            "t", stateful, "Account", Raises(ValueError), function_args=[1]
+        ).run()
+
+
+def test_wrong_or_missing_exceptions_fail(stateful: Path) -> None:
+    wrong = SimpleTest("t", stateful, "pop", Raises(KeyError), constructor="Stack")
+    assert _failure(wrong) == [
+        "Stack()",
+        "expected .pop() to raise KeyError, but it raised IndexError: pop from empty "
+        "list",
+    ]
+    missing = SimpleTest("t", stateful, "count", Raises("ValueError"))
+    assert _failure(missing) == [
+        "expected count() to raise ValueError, but it returned 1"
+    ]
+    unknown = SimpleTest("t", stateful, "count", Raises("Undefined"))
+    assert "Undefined is not an exception class" in _failure(unknown)[0]
+
+
+GRAPHS = """
+class Graph:
+    def __init__(self, edges, *, name=""):
+        if edges is None:
+            raise ValueError("no edges")
+        self.edges = list(edges)
+        self.name = name
+
+    def __eq__(self, other):
+        return isinstance(other, Graph) and other.edges == self.edges
+
+    def successors(self, node):
+        return [b for a, b in self.edges if a == node]
+
+def degree(g, node):
+    return (type(g).__module__, len(g.successors(node)))
+
+def degrees(graphs, node):
+    return [len(g.successors(node)) for g in graphs]
+
+def union(g, other=None):
+    return Graph(g.edges + other.edges)
+
+class Holder:
+    def __init__(self, g):
+        self.g = g
+
+    def size(self):
+        return len(self.g.edges)
+"""
+
+EDGES = [("A", "B"), ("A", "C"), ("B", "C")]
+
+
+@pytest.fixture
+def graphs(tmp_path: Path) -> Path:
+    path = tmp_path / "graphs.py"
+    path.write_text(GRAPHS)
+    return path
+
+
+def test_make_creates_objects_of_the_exercise_file(graphs: Path) -> None:
+    test = SimpleTest(
+        "t", graphs, "degree", ("current_solution", 2),
+        function_args=[Make("Graph", EDGES), "A"],
+    )  # fmt: skip
+    loaded = json.loads(json.dumps(test))
+    assert loaded.function_args[0] == Make("Graph", EDGES)
+    loaded.run()
+
+
+def test_make_in_lists_kwargs_constructors_and_expected_values(graphs: Path) -> None:
+    graph = Make("Graph", EDGES, name="g")
+    SimpleTest(
+        "t", graphs, "degrees", [2, 0], function_args=[[graph, Make("Graph", [])], "A"]
+    ).run()
+    SimpleTest(
+        "t", graphs, "union", Make("Graph", EDGES + EDGES),
+        function_args=[graph], function_kwargs={"other": graph},
+    ).run()  # fmt: skip
+    SimpleTest(
+        "t", graphs, "size", 3, constructor="Holder", constructor_args=[graph]
+    ).run()
+    wrong = SimpleTest(
+        "t", graphs, "union", Make("Graph", []), function_args=[graph],
+        function_kwargs={"other": graph},
+    )  # fmt: skip
+    assert "current_solution.Graph object" in _failure(wrong)[0]
+
+
+def test_make_failures_name_the_call(graphs: Path) -> None:
+    missing = SimpleTest(
+        "t", graphs, "degree", Raises(AttributeError),
+        function_args=[Make("Tree", EDGES), "A"],
+    )  # fmt: skip
+    (line,) = _failure(missing)
+    assert line.startswith("creating the values of degree(Make('Tree', ")
+    assert line.endswith(
+        "raised AttributeError: module 'current_solution' has no attribute 'Tree'"
+    )
+    raising = SimpleTest(
+        "t", graphs, "degree", 0, function_args=[Make("Graph", None), "A"]
+    )
+    assert "raised ValueError: no edges" in _failure(raising)[0]
+    constructor = SimpleTest(
+        "t", graphs, "size", 0, constructor="Holder",
+        constructor_args=[Make("Graph", None)],
+    )  # fmt: skip
+    assert "creating the object" in _failure(constructor)[0]
+
+
+def test_make_marker() -> None:
+    assert repr(Make("Graph", [("A", "B")], name="g")) == (
+        "Make('Graph', [('A', 'B')], name='g')"
+    )
+    assert Make("a.B", 1) == Make("a.B", 1) != Make("a.B", 2)
+    with pytest.raises(TypeError):
+        Make("not a name")
+
+
+def test_raises_marker() -> None:
+    assert Raises(ValueError) == Raises("ValueError")
+    assert repr(Raises(ValueError)) == "Raises('ValueError')"
+    assert Raises("a.B") != Raises("B")
+    with pytest.raises(TypeError):
+        Raises(int)  # pyright: ignore[reportArgumentType]
+    with pytest.raises(TypeError):
+        Raises("not a name")
+
+
+def test_unexpected_exceptions_name_the_call(stateful: Path) -> None:
+    test = SimpleTest(
+        "t",
+        stateful,
+        ["push", "pop", "pop", "push"],
+        [None, 1, 0, None],
+        function_args=[[1], [], [], [2]],
+        constructor="Stack",
+    )
+    with pytest.raises(AssertionError) as excinfo:
+        test.run()
+    assert str(excinfo.value).splitlines() == [
+        "Stack()",
+        ".push(1) -> None",
+        ".pop() -> 1",
+        "call 3 of 4 (.pop()) raised IndexError: pop from empty list",
+    ]
+    assert isinstance(excinfo.value.__cause__, IndexError)
+
+    broken = SimpleTest("t", stateful, "pop", 1, constructor="Account")
+    with pytest.raises(AssertionError, match=r"^creating the object, Account\(\)"):
+        broken.run()
+
+
+ISOLATED = """
+from pathlib import Path
+
+def write():
+    Path("out.txt").write_text("written")
+    return sorted(p.name for p in Path().iterdir())
+
+if __name__ == "__main__":
+    print(write())
+"""
+
+
+def test_isolated_tests_leave_no_files_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    (tmp_path / "ex").mkdir()
+    path = tmp_path / "ex" / "isolated.py"
+    path.write_text(ISOLATED)
+    # relative to the working directory, which the tests leave
+    relative = Path("..", "ex", "isolated.py")
+
+    simple = SimpleTest("t", relative, "write", ["out.txt"], isolated=True)
+    simple.run()
+    PrintTest("t", relative, "['out.txt']", isolated=True).run()
+    assert simple.file_path == relative  # restored
+    assert list(work.iterdir()) == []
+    assert Path.cwd() == work
+
+    # without isolation, the file is written next to the exercise file, where the
+    # code runs, as students run it
+    SimpleTest("t", relative, "write", ["isolated.py", "out.txt"]).run()
+    assert (tmp_path / "ex" / "out.txt").read_text() == "written"
+    assert list(work.iterdir()) == []
+    assert Path.cwd() == work
 
 
 # --- PrintTest ---

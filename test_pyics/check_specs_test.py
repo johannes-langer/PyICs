@@ -447,6 +447,18 @@ def test_spec_test_json_round_trip(tmp_path: Path, by_type: bool):
         loaded.run()
 
 
+def test_spec_test_of_a_method(tmp_path: Path):
+    solution = tmp_path / "solution.py"
+    solution.write_text(SOLUTION)
+
+    test = json.loads(json.dumps(SpecTest("spec", solution, "Node.add", Node.add)))
+    test.run()
+
+    solution.write_text(SOLUTION.replace("def add", "def plus"))
+    with pytest.raises(AssertionError, match=r"solution.py has no symbol 'Node.add'"):
+        test.run()
+
+
 FLAT_SOLUTION = """
 class Child:
     x: int
