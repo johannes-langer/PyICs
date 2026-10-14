@@ -51,7 +51,8 @@ class TestResult:
         ``trace_text``). None if it wasn't traced.
     index: int | None
         The position of the test in the tests that were run, e.g. to match the results
-        of different runs of a task's tests. None if unknown.
+        of different runs of a task's tests. None if unknown. The results of all tests
+        that a ``GeneralTest`` collects share its index.
     """
 
     __test__ = False  # not a test class, despite its name

@@ -317,7 +317,7 @@ def _compile(code: str, filename: str) -> CodeType:
     return compile(tree, filename, "exec", dont_inherit=True)
 
 
-def _register_source(filename: str, source: str) -> None:
+def register_source(filename: str, source: str) -> None:
     """Register ``source`` as the contents of the file ``filename`` in ``linecache``,
     where tracebacks, ``inspect`` and traces look up source lines. Without a
     modification time, ``linecache.checkcache`` keeps it."""
@@ -521,7 +521,7 @@ class _Runner:
         filename = cell_filename(self.path, cell)
         # the code that runs, which traces can only show if it can be parsed.
         # Registered before compiling, so that syntax errors can show their line, too.
-        _register_source(filename, code)
+        register_source(filename, code)
         compiled = _compile(code, filename)
         if (magic := _cell_magic(cell.source)) is None:
             value = self.shell.execute(compiled)

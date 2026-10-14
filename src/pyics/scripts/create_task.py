@@ -30,13 +30,20 @@ from pyics.data.task import Task
 from pyics.notebook import cells, loader, sections
 from pyics.notebook.sections import Section
 from pyics.tests import Test, check_specs, check_structure
+from pyics.tests.capture import capture_stderr, capture_stdout
+from pyics.tests.pytest_integration import run_tests
+from pyics.tests.results import TestResult
 from pyics.tests.tests import (
     INHERIT,
+    Call,
+    GeneralTest,
     Inherit,
     PrintTest,
+    Raises,
     SimpleTest,
     SpecTest,
     StructureTest,
+    check_source,
 )
 from pyics.util import paths
 from pyics.util.terminal import fullscreen
@@ -46,8 +53,15 @@ _INFO = "Creating a new task..."
 _ENTER_TEXT = "Enter text"
 
 # Test types the CLI can create. Their constructor parameters are prompted for by
-# ``_prompt_test``, and the first line of their docstring is shown as a hint.
-_TEST_TYPES: list[type[Test]] = [SimpleTest, SpecTest, StructureTest, PrintTest]
+# ``_prompt_test`` (a ``SimpleTest``'s by ``_prompt_simple_test``), and the first line
+# of their docstring is shown as a hint.
+_TEST_TYPES: list[type[Test]] = [
+    SimpleTest,
+    SpecTest,
+    StructureTest,
+    PrintTest,
+    GeneralTest,
+]
 _NO_MORE_TESTS = "Done"
 
 # What to do with a file or test of a task that is being edited. Keeping is preselected,
@@ -78,6 +92,45 @@ _NO_SECTION = "No section (whole notebook)"
 _WHOLE_NOTEBOOK = "Whole notebook"
 # the module a notebook with test information runs as (see ``_load_namespace``)
 _INFO_MODULE = "pyics_test_information"
+# what a ``SimpleTest`` calls (see ``_prompt_simple_test``)
+_MODULE_CALLS = "Call functions of the module"
+_OBJECT_CALLS = "Create an object and call its methods"
+_CALL_HINTS = {
+    _MODULE_CALLS: "Call functions (or classes) of the exercise file, one after the "
+    "other.",
+    _OBJECT_CALLS: "Create an object by calling a class (or function) of the exercise "
+    "file, then call its methods, one after the other.",
+}
+_RAISES_HINT = (
+    "Raises(ValueError) expects the call to raise a ValueError, also one the "
+    "exercise file defines, e.g. Raises('InsufficientFunds')."
+)
+# where the source of a ``GeneralTest`` comes from (see ``_prompt_source``)
+_KEEP_SOURCE = "Keep stored source"
+_FROM_FILE = "From a file"
+_TYPE_IT = "Type it"
+_SOURCE_HINTS = {
+    _KEEP_SOURCE: "Keep the test's source as it is.",
+    _FROM_FILE: "Read the source from a Python file of pytest tests.",
+    _TYPE_IT: "Type the source in, as pytest code.",
+}
+_SOURCE_DETAILS = (
+    "pytest tests: functions named test..., or classes named Test..., which can use "
+    "pytest's fixtures, and solution, load_solution, run_solution, exercise_path and "
+    "capsys (see general_test.md)."
+)
+# what to do with a ``GeneralTest`` once it is checked against the solution
+_EDIT_AGAIN = "Edit again"
+_DISCARD = "Discard"
+_CHECK_HINTS = {
+    _KEEP: "Keep the test as it is.",
+    _EDIT_AGAIN: "Change the test's source, and check it again.",
+    _DISCARD: "Leave the test out of the task.",
+}
+_SKIP = "Skip"
+# the results of checking a ``GeneralTest`` against a solution, by its source and the
+# solution's path and contents, since flows are replayed (see ``PromptSession``)
+_CHECKED: dict[tuple[Any, ...], list[TestResult]] = {}
 
 
 def _confirm(s: PromptSession, label: str, *, default: bool = True) -> bool:
@@ -449,6 +502,14 @@ def _check(test_cls: type[Test], param: inspect.Parameter, value: Any) -> Any:
         raise TypeError(f"expected a list of str, got {reprlib.repr(value)}")
     if param.annotation is bool and not isinstance(value, bool):
         raise TypeError(f"expected True or False, got {reprlib.repr(value)}")
+    if param.annotation is list and not isinstance(value, (list, tuple)):
+        raise TypeError(f"expected a list of arguments, got {reprlib.repr(value)}")
+    if param.annotation is dict and not (
+        isinstance(value, dict) and all(isinstance(k, str) for k in value)
+    ):
+        raise TypeError(
+            f"expected a dict of keyword arguments, got {reprlib.repr(value)}"
+        )
     # checked now, rather than when the task file is written after all other fields
     json.dumps(value)
     return value
@@ -456,9 +517,10 @@ def _check(test_cls: type[Test], param: inspect.Parameter, value: Any) -> Any:
 
 def _evaluates_to(code: str, value: Any) -> bool:
     """Whether ``code`` evaluates to ``value``, e.g. whether a ``repr`` is valid Python
-    that can prefill an input for ``value``."""
+    that can prefill an input for ``value``. ``Raises`` is in scope, as it is for the
+    expected values of a ``SimpleTest``."""
     try:
-        return bool(eval(code, {"__builtins__": builtins}) == value)
+        return bool(eval(code, {"__builtins__": builtins, "Raises": Raises}) == value)
     except Exception:  # noqa: BLE001
         return False
 
@@ -470,14 +532,18 @@ def _prompt_param(
     symbols: dict[str, Any],
     problem: str,
     current: Any = inspect.Parameter.empty,
+    *,
+    label: str | None = None,
 ) -> Any:
     """
     Ask for the value of the ``test_cls`` constructor parameter ``param``, prefilled with
     its ``current`` value when editing a test, otherwise with its default: plain text for
     ``str`` parameters (on several lines for the expected output of a ``PrintTest``),
-    otherwise a Python expression, evaluated with ``symbols`` in scope. ``problem``, if
-    not empty, is shown below the input.
+    otherwise a Python expression, evaluated with ``symbols`` in scope (and ``Raises``,
+    for the expected value of a ``SimpleTest``). ``problem``, if not empty, is shown
+    below the input. The prompt is labelled ``label``, by default the parameter's name.
     """
+    label = param.name if label is None else label
     lines = [Text(problem, style="red")] if problem else []
     editing = current is not param.empty
     value = current if editing else param.default
@@ -487,7 +553,7 @@ def _prompt_param(
         str_symbols = {k: v for k, v in symbols.items() if isinstance(v, str)}
         if str_symbols:
             hints = {k: reprlib.repr(v) for k, v in str_symbols.items()}
-            prompt = SelectInput(param.name, [*str_symbols, _ENTER_TEXT], hints=hints)
+            prompt = SelectInput(label, [*str_symbols, _ENTER_TEXT], hints=hints)
             if editing:  # the current value is prefilled in the text input
                 prompt.set_answer(_ENTER_TEXT)
             choice = s.ask(prompt)
@@ -498,7 +564,7 @@ def _prompt_param(
         details = Group(*lines) if lines else None
         multiline = test_cls is PrintTest and param.name == "expected"
         return s.ask(
-            TextInput(param.name, multiline=multiline, initial=initial, details=details)
+            TextInput(label, multiline=multiline, initial=initial, details=details)
         )
 
     initial = repr(value) if has_value else ""
@@ -507,19 +573,33 @@ def _prompt_param(
         symbols = {**symbols, _CURRENT: value}
         initial = _CURRENT
 
+    scope: dict[str, Any] = {"__builtins__": builtins}
     if test_cls is StructureTest and param.name == "rules":
         concepts = ", ".join(check_structure.CONCEPTS)
         lines.append(Text(f"Concepts: {concepts}", style="dim"))
+    if test_cls is SimpleTest and param.name == "expected":
+        scope["Raises"] = Raises
+        lines.append(Text(_RAISES_HINT, style="dim"))
     if symbols:
         lines.append(Text("Variables in scope:", style="dim"))
         lines.extend(
             Text(f"  {k} = {reprlib.repr(v)}", style="dim") for k, v in symbols.items()
         )
-    prompt = CodeInput(
-        param.name, initial=initial, details=Group(*lines) if lines else None
-    )
-    scope = {"__builtins__": builtins, **symbols}
+    prompt = CodeInput(label, initial=initial, details=Group(*lines) if lines else None)
+    scope.update(symbols)
     return s.ask(prompt, lambda raw: _check(test_cls, param, eval(raw, dict(scope))))
+
+
+def _prompt_file_path(
+    s: PromptSession, ex_files: list[Path], current: Test | None = None
+) -> Path:
+    """Ask which of ``ex_files`` a test is about, prefilled with the file of the test
+    ``current`` when editing it."""
+    prompt = SelectInput("file_path", [str(f) for f in ex_files])
+    if current is not None:
+        options = {paths.absolute(f): str(f) for f in ex_files}
+        prompt.set_answer(options.get(paths.absolute(current.file_path), ""))
+    return Path(s.ask(prompt)).absolute()
 
 
 def _prompt_test(
@@ -530,7 +610,8 @@ def _prompt_test(
     *,
     task_sections: Mapping[Path, str] | None = None,
     contents: Mapping[Path, str] | None = None,
-) -> Test:
+    sol_files: list[Path] | None = None,
+) -> Test | None:
     """
     Interactively define a test of type ``test_cls``, by asking for each parameter of its
     constructor. When editing the test ``current``, each one is prefilled with its
@@ -546,6 +627,15 @@ def _prompt_test(
     by default the task's, i.e. its section in ``task_sections`` (by path). Sections are
     looked up in the ``contents`` kept for the notebook (by path), else in the file on
     disk.
+
+    A ``SimpleTest`` is asked for by ``_prompt_simple_test``. A ``GeneralTest``'s
+    source is asked for by ``_prompt_source``, and the test is then checked against
+    one of the solution files ``sol_files`` (see ``_check_general_test``).
+
+    Returns
+    -------
+    Test | None
+        The test, or None if a ``GeneralTest`` was discarded once it was checked.
     """
     task_sections = {paths.absolute(p): n for p, n in (task_sections or {}).items()}
     kept = {paths.absolute(p): text for p, text in (contents or {}).items()}
@@ -555,6 +645,9 @@ def _prompt_test(
         symbols, info_problem = s.ask(
             PathInput("Test information file"), _load_namespace
         )
+    if test_cls is SimpleTest:
+        assert current is None or isinstance(current, SimpleTest)
+        return _prompt_simple_test(s, ex_files, current, symbols, info_problem)
 
     kwargs: dict[str, Any] = {}
     for param in inspect.signature(test_cls).parameters.values():
@@ -563,11 +656,7 @@ def _prompt_test(
         value = getattr(current, param.name, param.empty) if current else param.empty
 
         if param.name == "file_path":
-            prompt = SelectInput(param.name, [str(f) for f in ex_files])
-            if current is not None:
-                options = {paths.absolute(f): str(f) for f in ex_files}
-                prompt.set_answer(options.get(paths.absolute(current.file_path), ""))
-            kwargs[param.name] = Path(s.ask(prompt)).absolute()
+            kwargs[param.name] = _prompt_file_path(s, ex_files, current)
             continue
 
         if param.name == "section":
@@ -587,6 +676,18 @@ def _prompt_test(
             continue
 
         problem = info_problem
+        if test_cls is GeneralTest and param.name == "source":
+            source = symbols.get("source")
+            try:
+                kwargs[param.name] = check_source(source)  # type: ignore[arg-type]
+                continue
+            except (TypeError, ValueError, SyntaxError) as err:
+                if param.name in symbols:
+                    problem = f"'source' from the test information file: {err}"
+            stored = None if value is param.empty else value
+            kwargs[param.name] = _prompt_source(s, stored, stored=True, problem=problem)
+            continue
+
         if param.name in symbols:
             try:
                 kwargs[param.name] = _check(test_cls, param, symbols[param.name])
@@ -595,18 +696,374 @@ def _prompt_test(
                 problem = f"'{param.name}' from the test information file: {err}"
         kwargs[param.name] = _prompt_param(s, test_cls, param, symbols, problem, value)
 
-    return test_cls(**kwargs)
+    test = test_cls(**kwargs)
+    if isinstance(test, GeneralTest):
+        return _check_general_test(s, test, sol_files or [], task_sections)
+    return test
+
+
+def _check_dotted_name(raw: str) -> str:
+    """Return ``raw`` if it can name an attribute, maybe dotted (e.g. ``Stack`` or
+    ``shapes.Circle``), raise otherwise."""
+    if not raw or not all(part.isidentifier() for part in raw.split(".")):
+        raise ValueError(f"{raw!r} is not a name, e.g. Stack or shapes.Circle")
+    return raw
+
+
+def _prompt_constructor(
+    s: PromptSession, symbols: Mapping[str, Any], current: str | None, problem: str
+) -> str:
+    """
+    Ask for the name of the class or function that creates the object whose methods a
+    ``SimpleTest`` calls: one of the classes and functions of the test information
+    file (its ``symbols``), or a name that is entered. A ``constructor`` variable of
+    the file that is a name is used directly. Prefilled with the ``current`` name when
+    editing a test.
+    """
+    if isinstance(name := symbols.get("constructor"), str):
+        try:
+            return _check_dotted_name(name)
+        except ValueError as err:
+            problem = f"'constructor' from the test information file: {err}"
+    found = {
+        k: v for k, v in symbols.items() if inspect.isclass(v) or inspect.isfunction(v)
+    }
+    if found:
+        hints = {
+            k: f"{'Class' if inspect.isclass(v) else 'Function'} of the test "
+            "information file."
+            for k, v in found.items()
+        }
+        prompt = SelectInput("constructor", [*found, _ENTER_TEXT], hints=hints)
+        if current is not None:
+            prompt.set_answer(current if current in found else _ENTER_TEXT)
+        choice = s.ask(prompt)
+        if choice != _ENTER_TEXT:
+            return choice
+    lines = [Text(problem, style="red")] if problem else []
+    lines.append(
+        Text(
+            "The class (or function) of the exercise file that creates the object.",
+            style="dim",
+        )
+    )
+    prompt = TextInput("constructor", initial=current or "", details=Group(*lines))
+    return s.ask(prompt, _check_dotted_name)
+
+
+def _prompt_simple_test(
+    s: PromptSession,
+    ex_files: list[Path],
+    current: SimpleTest | None,
+    symbols: dict[str, Any],
+    problem: str,
+) -> SimpleTest:
+    """
+    Interactively define a ``SimpleTest``: its name and file, whether it calls the
+    functions of the module or the methods of an object (then also the constructor
+    and its arguments), the calls, one after the other, and whether it is traceable
+    and isolated. A call is stored as a single call, several as a sequence.
+
+    Each call after the first is prefilled with the one before, so that a call is
+    repeated by confirming each of its prompts. When editing the test ``current``,
+    everything is prefilled with its current values, including its calls. The
+    variables ``symbols`` of the test information file are used as in
+    ``_prompt_test``, those for the calls only for the first one; ``problem`` is shown
+    below the prompts, if not empty.
+    """
+    empty = inspect.Parameter.empty
+
+    def ask(
+        name: str,
+        annotation: Any,
+        default: Any = empty,
+        value: Any = empty,
+        *,
+        from_symbols: bool = True,
+        label: str | None = None,
+    ) -> Any:
+        param = inspect.Parameter(
+            name, inspect.Parameter.KEYWORD_ONLY, default=default, annotation=annotation
+        )
+        shown = problem
+        if from_symbols and name in symbols:
+            try:
+                return _check(SimpleTest, param, symbols[name])
+            except (TypeError, ValueError) as err:
+                shown = f"'{name}' from the test information file: {err}"
+        return _prompt_param(s, SimpleTest, param, symbols, shown, value, label=label)
+
+    def current_value(name: str) -> Any:
+        return getattr(current, name) if current is not None else empty
+
+    name = ask("name", str, value=current_value("name"))
+    file_path = _prompt_file_path(s, ex_files, current)
+
+    kind = SelectInput("What does the test call?", list(_CALL_HINTS), hints=_CALL_HINTS)
+    if current is not None and current.constructor is not None:
+        kind.set_answer(_OBJECT_CALLS)
+    constructor: dict[str, Any] = {}
+    if s.ask(kind) == _OBJECT_CALLS:
+        stored = current.constructor if current is not None else None
+        constructor["constructor"] = _prompt_constructor(s, symbols, stored, problem)
+        has_stored = stored is not None
+        for arg, annotation, default in (
+            ("constructor_args", list, []),
+            ("constructor_kwargs", dict, {}),
+        ):
+            value = current_value(arg) if has_stored else empty
+            constructor[arg] = ask(arg, annotation, default, value)
+
+    stored_calls = current.calls() if current is not None else []
+    calls: list[Call] = []
+    while True:
+        i = len(calls)
+        # prefilled with the stored call, or the call before
+        previous = stored_calls[i] if i < len(stored_calls) else None
+        previous = previous or (calls[-1] if calls else None)
+        values = previous or Call(empty, empty, empty, empty)  # type: ignore[arg-type]
+        first = i == 0
+
+        def label(param: str, first: bool = first, i: int = i) -> str | None:
+            return None if first else f"call {i + 1}: {param}"
+
+        call = Call(
+            ask(
+                "function_name",
+                str,
+                value=values.name,
+                from_symbols=first,
+                label=label("function_name"),
+            ),
+            ask(
+                "function_args",
+                list,
+                [],
+                values.args,
+                from_symbols=first,
+                label=label("function_args"),
+            ),
+            ask(
+                "function_kwargs",
+                dict,
+                {},
+                values.kwargs,
+                from_symbols=first,
+                label=label("function_kwargs"),
+            ),
+            ask(
+                "expected",
+                Any,
+                value=values.expected,
+                from_symbols=first,
+                label=label("expected"),
+            ),
+        )
+        calls.append(call)
+        more = len(calls) < len(stored_calls)
+        if not _confirm(s, "Add another call?", default=more):
+            break
+
+    traceable = ask("traceable", bool, True, current_value("traceable"))
+    isolated = ask("isolated", bool, False, current_value("isolated"))
+
+    if len(calls) == 1:  # stored as a single call
+        (call,) = calls
+        function_name, args, kwargs, expected = call
+    else:
+        function_name = [c.name for c in calls]
+        args = [list(c.args) for c in calls]
+        kwargs = [c.kwargs for c in calls]
+        expected = [c.expected for c in calls]
+    return SimpleTest(
+        name,
+        file_path,
+        function_name,
+        expected,
+        function_args=list(args),
+        function_kwargs=kwargs,
+        traceable=traceable,
+        isolated=isolated,
+        **constructor,
+    )
+
+
+def _read_source(raw: str) -> str:
+    """The source of a ``GeneralTest`` in the Python file at ``raw``, if it is one
+    (see ``check_source``), raise otherwise."""
+    return check_source(_check_file(raw).read_text(encoding="utf-8"))
+
+
+def _prompt_source(
+    s: PromptSession,
+    current: str | None = None,
+    *,
+    stored: bool = False,
+    problem: str = "",
+) -> str:
+    """
+    Ask for the source of a ``GeneralTest`` (see ``check_source``): from a Python file,
+    or typed in. With a ``current`` source, the stored one when editing a test
+    (``stored``), it can be kept, which is preselected; otherwise typing it in is
+    preselected, prefilled with it. ``problem``, if not empty, is shown below the
+    prompts.
+    """
+    lines = [Text(problem, style="red")] if problem else []
+    lines.append(Text(_SOURCE_DETAILS, style="dim"))
+    options = [_FROM_FILE, _TYPE_IT]
+    if stored and current is not None:
+        options.insert(0, _KEEP_SOURCE)
+    prompt = SelectInput("source", options, hints=_SOURCE_HINTS, details=Group(*lines))
+    if current is not None:
+        prompt.set_answer(_KEEP_SOURCE if stored else _TYPE_IT)
+    choice = s.ask(prompt)
+    if choice == _KEEP_SOURCE and current is not None:
+        return current
+    if choice == _FROM_FILE:
+        return s.ask(PathInput("Test source file", details=Group(*lines)), _read_source)
+    typed = CodeInput(
+        "source", multiline=True, initial=current or "", details=Group(*lines)
+    )
+    return s.ask(typed, check_source)
+
+
+def _choose_solution(
+    s: PromptSession, test: Test, sol_files: list[Path]
+) -> Path | None:
+    """The solution file to check ``test`` against: the only one of ``sol_files`` on
+    disk, or the one with the name of the test's file, otherwise the one the user
+    chooses. None if there is none, or the user skips the check."""
+    candidates = [f for f in sol_files if Path(f).is_file()]
+    if len(candidates) <= 1:
+        return candidates[0] if candidates else None
+    same_name = [f for f in candidates if Path(f).name == Path(test.file_path).name]
+    if len(same_name) == 1:
+        return same_name[0]
+    prompt = SelectInput(
+        "Solution file to check the test against",
+        [*(str(f) for f in candidates), _SKIP],
+        hints={_SKIP: "Don't check the test."},
+    )
+    choice = s.ask(prompt)
+    return None if choice == _SKIP else Path(choice)
+
+
+def _run_against(
+    test: GeneralTest, solution: Path, section: str | None
+) -> list[TestResult]:
+    """
+    The results of running ``test`` on ``solution`` instead of its exercise file,
+    about its ``section`` of a notebook, if any. Their output is captured, so that it
+    doesn't show in the CLI. Cached by the test's source and the solution's path and
+    contents, since flows are replayed.
+    """
+    path = paths.absolute(solution)
+    key = (test.source, test.isolated, path, path.read_bytes(), section)
+    if key not in _CHECKED:
+        checked = copy.copy(test)
+        checked.file_path = path
+        sections = {path: section} if section is not None else None
+        with capture_stdout(), capture_stderr():
+            _CHECKED[key] = run_tests([checked], sections=sections)
+    return _CHECKED[key]
+
+
+def _check_general_test(
+    s: PromptSession,
+    test: GeneralTest,
+    sol_files: list[Path],
+    task_sections: Mapping[Path, str],
+) -> GeneralTest | None:
+    """
+    Run ``test`` on one of the solution files ``sol_files`` (see ``_choose_solution``),
+    in its task's section (``task_sections``, by absolute path) if it has one, and ask
+    whether to keep it, edit its source again (then it is checked again), or discard
+    it, showing how many of its tests passed, and the failures.
+
+    Returns
+    -------
+    GeneralTest | None
+        The test, or None if it is discarded.
+    """
+    solution = _choose_solution(s, test, sol_files)
+    if solution is None:
+        return test
+    section = task_sections.get(paths.absolute(test.file_path))
+    while True:
+        try:
+            results = _run_against(test, solution, section)
+        except OSError as err:  # e.g. the solution file was removed meanwhile
+            details: RenderableType = Text(f"Could not check the test: {err}", "red")
+            summary = "not checked"
+        else:
+            calls = [r for r in results if r.when == "call"]
+            counts = {
+                outcome: sum(r.outcome == outcome for r in calls)
+                for outcome in ("passed", "failed", "skipped")
+            }
+            summary = ", ".join(
+                f"{n} {outcome}"
+                for outcome, n in counts.items()
+                if n or outcome != "skipped"
+            )
+            failures: list[RenderableType] = []
+            for r in calls:
+                if r.outcome == "passed":
+                    continue
+                failures.append(Text(f"{r.nodeid} {r.outcome}", style="bold red"))
+                failures.append(r.message_text)
+            details = (
+                Group(*failures)
+                if failures
+                else Text("All of its tests pass on the solution.", style="dim")
+            )
+        label = f"Checked on {escape(str(solution))}: {summary}"
+        options = [_KEEP, _EDIT_AGAIN, _DISCARD]
+        prompt = SelectInput(label, options, hints=_CHECK_HINTS, details=details)
+        choice = s.ask(prompt)
+        if choice == _KEEP:
+            return test
+        if choice == _DISCARD:
+            return None
+        test = copy.copy(test)
+        test.source = _prompt_source(s, test.source)
+
+
+# parameters of a ``SimpleTest`` that ``_describe_test`` shows as its calls
+_CALL_PARAMS = {
+    "function_name",
+    "function_args",
+    "function_kwargs",
+    "expected",
+    "constructor",
+    "constructor_args",
+    "constructor_kwargs",
+}
 
 
 def _describe_test(test: Test, problem: str = "") -> RenderableType:
-    """The type and parameters of ``test``, below ``problem`` if it isn't empty."""
+    """The type and parameters of ``test``, below ``problem`` if it isn't empty. The
+    calls of a ``SimpleTest`` are shown as code (see ``SimpleTest.describe_calls``),
+    and the source of a ``GeneralTest`` by its number of lines."""
     lines = [Text(problem, style="red")] if problem else []
     lines.append(Text(type(test).__name__, style="dim"))
     for param in inspect.signature(type(test)).parameters.values():
+        if isinstance(test, SimpleTest) and param.name in _CALL_PARAMS:
+            if param.name == "function_name":
+                lines.append(Text("  calls:", style="dim"))
+                lines.extend(
+                    Text(f"    {line}", style="dim") for line in test.describe_calls()
+                )
+            continue
         value = getattr(test, param.name, param.empty)
         if value is param.empty or value is INHERIT:
             continue
-        text = str(value) if isinstance(value, PurePath) else reprlib.repr(value)
+        if isinstance(test, GeneralTest) and param.name == "source":
+            text = f"{len(str(value).splitlines())} lines of pytest code"
+        elif isinstance(value, PurePath):
+            text = str(value)
+        else:
+            text = reprlib.repr(value)
         lines.append(Text(f"  {param.name} = {text}", style="dim"))
     return Group(*lines)
 
@@ -618,12 +1075,14 @@ def _prompt_tests(
     *,
     task_sections: Mapping[Path, str] | None = None,
     contents: Mapping[Path, str] | None = None,
+    sol_files: list[Path] | None = None,
 ) -> list[Test]:
     """
     Interactively define any number of tests, choosing the test type for each. When
     editing a task, its ``current`` tests are kept, edited or removed first, and adding
     more is not preselected. A test whose file isn't one of ``ex_files`` can't be kept
-    as it is. ``task_sections`` and ``contents`` are passed on to ``_prompt_test``.
+    as it is. ``task_sections``, ``contents`` and ``sol_files`` are passed on to
+    ``_prompt_test``.
     """
     tests: list[Test] = []
     ex = {paths.absolute(f) for f in ex_files}
@@ -641,16 +1100,17 @@ def _prompt_tests(
         if choice == _KEEP:
             tests.append(test)
         elif choice == _EDIT:
-            tests.append(
-                _prompt_test(
-                    s,
-                    type(test),
-                    ex_files,
-                    current=test,
-                    task_sections=task_sections,
-                    contents=contents,
-                )
+            edited = _prompt_test(
+                s,
+                type(test),
+                ex_files,
+                current=test,
+                task_sections=task_sections,
+                contents=contents,
+                sol_files=sol_files,
             )
+            if edited is not None:
+                tests.append(edited)
 
     test_types = {cls.__name__: cls for cls in _TEST_TYPES}
     hints = {
@@ -669,15 +1129,16 @@ def _prompt_tests(
         kind = s.ask(prompt)
         if kind == _NO_MORE_TESTS:
             return tests
-        tests.append(
-            _prompt_test(
-                s,
-                test_types[kind],
-                ex_files,
-                task_sections=task_sections,
-                contents=contents,
-            )
+        test = _prompt_test(
+            s,
+            test_types[kind],
+            ex_files,
+            task_sections=task_sections,
+            contents=contents,
+            sol_files=sol_files,
         )
+        if test is not None:
+            tests.append(test)
 
 
 def _repoint(test: Test, moved: Mapping[Path, Path | None]) -> Test:
@@ -807,6 +1268,7 @@ def _task_flow(
         current_tests,
         task_sections=task_sections,
         contents=file_contents,
+        sol_files=sol_files,
     )
 
     s.cli.update_progress(6 / _TOTAL_STEPS)

@@ -21,7 +21,7 @@ from pyics.distribution.dependencies import (
     ModulePolicy,
     Problem,
 )
-from pyics.tests.tests import SimpleTest
+from pyics.tests.tests import GeneralTest, SimpleTest
 from pyics.util import json_handling
 from pyics.util.discovery import find_courses
 
@@ -267,6 +267,22 @@ def test_used_modules(fake_package: str, tmp_path: Path) -> None:
         "numpy": {"array.pyicstask.json"},
         "requests": {"code.pyicstask.json"},
     }
+
+
+def test_used_modules_finds_the_imports_of_general_tests(tmp_path: Path) -> None:
+    ex = tmp_path / "ex.py"
+    ex.write_text("def f():\n    return 1\n")
+    source = (
+        "import pytest\nfrom _pytest.capture import CaptureFixture\n"
+        "import numpy as np\nfrom pyics.testing import capture_stdout\n"
+        "import json\n\ndef test_f(solution):\n    assert solution.f() == 1\n"
+    )
+    task = Task.create_task_json(
+        tmp_path / "t", "T", "", ex, None, [GeneralTest("g", ex, source)]
+    )
+    tasks = {"t.pyicstask.json": json_handling.load_plain(task)}
+    # pytest is a dependency of pyics itself
+    assert dependencies.used_modules(tasks) == {"numpy": {"t.pyicstask.json"}}
 
 
 def test_undeclared(fake_package: str) -> None:

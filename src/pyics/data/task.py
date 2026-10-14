@@ -7,7 +7,6 @@ import threading
 import time
 from typing import Any, Union
 
-import pytest
 from rich.console import Group, RenderableType
 from rich.padding import Padding
 from rich.rule import Rule
@@ -19,16 +18,12 @@ from pyics import plugins
 from pyics.distribution.dependencies import ModulePolicy, check_task_data
 from pyics.notebook import cells
 from pyics.notebook import sections as notebook_sections
-from pyics.util import paths, terminal
+from pyics.util import paths
 from pyics.util.paths import StrPath
 from pyics.util.logging import get_logger
 from pyics.tests import Test
-from pyics.tests.pytest_integration import LiveTestCollectionPlugin
+from pyics.tests.pytest_integration import _pytest_lock, run_tests
 from pyics.tests.results import TestResult
-
-# pytest runs aren't thread-safe (e.g. the tests import the exercise file as the module
-# ``current_solution``), so all tasks' runs are serialized
-_pytest_lock = threading.Lock()
 
 
 def wait_for_test_runs(timeout: float = -1) -> None:
@@ -488,22 +483,17 @@ class Task:
         while self._tests_pending:
             self._tests_pending = False
             tracing = self.__tracing
-            plugin = LiveTestCollectionPlugin(
-                self.tests, tracing=tracing, sections=self.sections
-            )
             saved_at = self.__saved_at()
-
-            with _pytest_lock, terminal.preserve_terminal_mode():
-                pytest.main(["-p", "no:terminal", "--capture=no"], plugins=[plugin])
+            results = run_tests(self.tests, tracing=tracing, sections=self.sections)
 
             # log reports
             logger = get_logger(__name__)
-            for result in plugin.results:
+            for result in results:
                 logger.debug(f"{result.nodeid} {result.when} {result.outcome}")
                 logger.debug(_failure_text(result).plain)
 
             with self.__status_lock:
-                self.test_results = plugin.results
+                self.test_results = results
                 self.test_results_time = saved_at
                 self.__traced = tracing
                 self.__tested = True

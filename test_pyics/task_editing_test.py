@@ -265,9 +265,11 @@ def test_edit_test_prefilled(task_file: Path) -> None:
             *KEEP_ALL[:7],
             DOWN, ENTER,  # edit the test
             ENTER,  # reference a file with test information: no
-            ENTER, ENTER, ENTER,  # name, file_path, function_name: keep
+            ENTER, ENTER, ENTER,  # name, file_path, call functions of the module: keep
+            ENTER, ENTER, ENTER,  # function_name, function_args, function_kwargs: keep
             *_clear("1"), *_type("2"),  # expected
-            ENTER, ENTER, ENTER,  # function_args, function_kwargs, traceable: keep
+            ENTER,  # add another call: no
+            ENTER, ENTER,  # traceable, isolated: keep
             ENTER,
         ],
         task_file,
@@ -288,7 +290,9 @@ def test_edit_test_of_a_removed_file(task_file: Path) -> None:
             ENTER,  # edit the test, preselected since it can't be kept
             ENTER, ENTER,  # no test information file, name: keep
             ENTER,  # file_path: new.py, the only exercise file
-            ENTER, ENTER, ENTER, ENTER, ENTER,  # keep the other parameters
+            ENTER,  # call functions of the module
+            ENTER, ENTER, ENTER, ENTER,  # keep the call
+            ENTER, ENTER, ENTER,  # one call, keep traceable and isolated
             ENTER,
         ],
         task_file,
@@ -309,10 +313,11 @@ def test_values_without_a_python_repr_are_prefilled_by_reference(
             ENTER, CTRL_D, ENTER, ENTER, ENTER, ENTER,  # name, instructions, hints, files
             DOWN, ENTER,  # edit the test
             ENTER,  # reference a file with test information: no
-            ENTER, ENTER, ENTER, ENTER,  # name, file_path, function_name, expected
+            ENTER, ENTER, ENTER,  # name, file_path, call functions of the module
+            ENTER,  # function_name
             ENTER,  # function_args, prefilled with a reference to the current value
-            ENTER,  # function_kwargs
-            ENTER,  # traceable
+            ENTER, ENTER,  # function_kwargs, expected
+            ENTER, ENTER, ENTER,  # one call, traceable, isolated
             ENTER,
         ],
         task_file,
@@ -329,10 +334,10 @@ def test_strings_are_prefilled_despite_test_information(task_file: Path) -> None
             DOWN, ENTER,  # edit the test
             UP, ENTER, *_type("info.py"),  # reference a file with test information
             ENTER, ENTER,  # name: enter text (preselected), keep it
-            ENTER,  # file_path
+            ENTER, ENTER,  # file_path, call functions of the module
             ENTER, ENTER,  # function_name: enter text (preselected), keep it
-            ENTER, ENTER, ENTER,  # expected, function_args, function_kwargs
-            ENTER,  # traceable
+            ENTER, ENTER, ENTER,  # function_args, function_kwargs, expected
+            ENTER, ENTER, ENTER,  # one call, traceable, isolated
             ENTER,
         ],
         task_file,
