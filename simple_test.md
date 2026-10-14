@@ -186,16 +186,21 @@ single call of a module function lets the exception propagate, as it always has.
 
 In `create_task`, `Raises` is in scope when you enter an expected value.
 
-## `isolated`
+## Working directory and `isolated`
 
-With `isolated=True`, the test runs in a temporary working directory of its own, which
-is deleted afterwards. Use it when the student's code writes files that shouldn't pile
-up. `PrintTest` and `GeneralTest` take `isolated` too.
+Tests run the student's code in the directory of the exercise file, as students run it
+(in Jupyter, or as a script from its directory). So code that reads a data file next to
+it by a relative path, e.g. `open("edges.csv")`, finds it, and so does the test
+information file in `create_task`. Files the code writes end up there, too.
+
+With `isolated=True`, the test runs in a temporary working directory of its own instead,
+which is deleted afterwards. Use it when the student's code writes files that shouldn't
+pile up. `PrintTest` and `GeneralTest` take `isolated` too.
 
 Two things to keep in mind:
 
-- The working directory is process-wide. While an isolated test runs, the whole app runs
-  in the temporary directory. The app only compares files' modification times, so a save
-  made during the test is picked up afterwards.
+- The working directory is process-wide. While a test runs, the whole app runs in the
+  test's directory, so the app keeps its own paths absolute. It only compares files'
+  modification times, so a save made during the test is picked up afterwards.
 - Isolated tests start in an empty directory. Data files that the code reads by a
   relative path aren't there, so don't isolate tests whose code reads files next to it.

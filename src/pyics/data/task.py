@@ -142,7 +142,9 @@ class Task:
         self.__path = task_file
         raw_json = _load_task_json(task_file, module_policy)
 
-        base = Path(task_file).parent
+        # absolute, so that its paths still hold while a test runs in another working
+        # directory (see ``Test._working_directory``)
+        base = paths.absolute(task_file).parent
 
         self.name: str = raw_json.get("name", "Task")
         self.instructions: str = raw_json.get("instructions", "")

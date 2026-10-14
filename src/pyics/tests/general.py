@@ -350,14 +350,15 @@ def capsys(request: pytest.FixtureRequest) -> Generator[ThreadCapture]:
 
 
 @pytest.fixture(autouse=True)
-def _pyics_isolation(request: pytest.FixtureRequest) -> Generator[None]:
-    """Run each test of an ``isolated`` ``GeneralTest`` in a temporary working
-    directory of its own (see ``Test._isolation``)."""
+def _pyics_working_directory(request: pytest.FixtureRequest) -> Generator[None]:
+    """Run each test of a ``GeneralTest`` in the directory of its exercise file, or if
+    it is ``isolated``, in a temporary working directory of its own (see
+    ``Test._working_directory``)."""
     module = source_module(request.node)
     if module is None:
         yield
         return
-    with module.test._isolation():
+    with module.test._working_directory():
         yield
 
 

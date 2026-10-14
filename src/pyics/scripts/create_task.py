@@ -1,4 +1,5 @@
 import builtins
+import contextlib
 import copy
 import difflib
 import inspect
@@ -470,26 +471,31 @@ def _load_namespace(raw: str) -> tuple[dict[str, Any], str]:
         ``_prompt_param``), or an empty string. An error in a cell doesn't stop the
         notebook's run, but the variables it would have defined are missing.
     """
-    path = _check_file(raw)
+    path = paths.absolute(_check_file(raw))
     problem = ""
     prepare_imports(path)
-    if cells.is_notebook(path):
-        previous = sys.modules.get(_INFO_MODULE)
-        try:
-            run = loader.run_notebook(path, module_name=_INFO_MODULE)
-        finally:
-            if previous is None:
-                sys.modules.pop(_INFO_MODULE, None)
-            else:
-                sys.modules[_INFO_MODULE] = previous
-        namespace = vars(run.module)
-        if run.errors:
-            more = f" (and {len(run.errors) - 1} more)" if len(run.errors) > 1 else ""
-            problem = f"In the test information file, {run.errors[0].describe()}{more}"
-    else:
-        namespace = {}
-        source = path.read_text(encoding="utf-8")
-        exec(compile(source, str(path), "exec"), namespace)  # noqa: S102
+    # run in its directory, as the tests run the exercise files (see
+    # ``Test._working_directory``), e.g. to read a data file next to it
+    with contextlib.chdir(path.parent):
+        if cells.is_notebook(path):
+            previous = sys.modules.get(_INFO_MODULE)
+            try:
+                run = loader.run_notebook(path, module_name=_INFO_MODULE)
+            finally:
+                if previous is None:
+                    sys.modules.pop(_INFO_MODULE, None)
+                else:
+                    sys.modules[_INFO_MODULE] = previous
+            namespace = vars(run.module)
+            if run.errors:
+                more = f" (and {len(run.errors) - 1} more)" if len(run.errors) > 1 else ""
+                problem = (
+                    f"In the test information file, {run.errors[0].describe()}{more}"
+                )
+        else:
+            namespace = {}
+            source = path.read_text(encoding="utf-8")
+            exec(compile(source, str(path), "exec"), namespace)  # noqa: S102
     return {
         k: v
         for k, v in namespace.items()

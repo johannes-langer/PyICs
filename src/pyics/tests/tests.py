@@ -167,27 +167,35 @@ class Test(ABC):
         return self.section
 
     @contextlib.contextmanager
-    def _isolation(self) -> Generator[None]:
+    def _working_directory(self) -> Generator[None]:
         """
-        Run the code in this context in a temporary working directory of its own, which
-        is deleted afterwards, if the test is ``isolated``, e.g. so that the files the
-        code under test writes don't pile up. ``file_path`` is made absolute in the
-        meantime, as it may be relative to the working directory. Does nothing for
-        tests that aren't isolated.
+        Run the code in this context in the directory of the file at ``file_path``, as
+        students run it (in Jupyter, or as a script from its directory), so that it
+        finds the files next to it by relative paths, e.g. ``open("edges.csv")``. If the
+        test is ``isolated``, in a temporary working directory of its own instead, which
+        is deleted afterwards, e.g. so that the files the code under test writes don't
+        pile up. ``file_path`` is made absolute in the meantime, as it may be relative
+        to the working directory.
+
+        The working directory is process-wide, so the paths that other threads use while
+        tests run need to be absolute, as the app's are.
         """
-        if not getattr(self, "isolated", False):
-            yield
-            return
         file_path = self.file_path
         self.file_path = paths.absolute(file_path)
         try:
-            # cleanup errors are ignored, e.g. a file that is still open on Windows
-            with (
-                tempfile.TemporaryDirectory(
-                    prefix="pyics-", ignore_cleanup_errors=True
-                ) as tmp,
-                contextlib.chdir(tmp),
-            ):
+            if getattr(self, "isolated", False):
+                # cleanup errors are ignored, e.g. a file that is still open on Windows
+                with (
+                    tempfile.TemporaryDirectory(
+                        prefix="pyics-", ignore_cleanup_errors=True
+                    ) as tmp,
+                    contextlib.chdir(tmp),
+                ):
+                    yield
+            elif self.file_path.parent.is_dir():
+                with contextlib.chdir(self.file_path.parent):
+                    yield
+            else:  # a missing file fails the test as it is
                 yield
         finally:
             self.file_path = file_path
@@ -256,7 +264,7 @@ class PrintTest(Test):
     console in the meantime.
 
     With ``isolated``, the file is run in a temporary working directory of its own,
-    which is deleted afterwards (see ``Test._isolation``).
+    which is deleted afterwards (see ``Test._working_directory``).
 
     A notebook's code cells are run instead, and their output is compared, which
     includes what Jupyter shows as text: the ``repr`` of objects passed to ``display``,
@@ -279,7 +287,7 @@ class PrintTest(Test):
     # does. Also the default for tests stored before it was introduced.
     traceable: bool = True
     # whether the test runs in a temporary working directory of its own (see
-    # ``Test._isolation``). Only stored if set.
+    # ``Test._working_directory``). Only stored if set.
     isolated: bool = False
     # only set if the test is given a section, so that tests that inherit their task's
     # section store nothing (and tests stored before sections inherit it, too)
@@ -313,7 +321,7 @@ class PrintTest(Test):
         _skip_live_run()
         trace = trace if self.traceable else None
         is_notebook = cells.is_notebook(self.file_path)
-        with self._isolation():
+        with self._working_directory():
             output = run_script(
                 self, self.inputs, section=self.resolved_section(), trace=trace
             )
@@ -523,7 +531,7 @@ class SimpleTest(Test):
     values, which create an object of the exercise file while the test runs.
 
     With ``isolated``, the test runs in a temporary working directory of its own, which
-    is deleted afterwards (see ``Test._isolation``).
+    is deleted afterwards (see ``Test._working_directory``).
     """
 
     # a str for a single call, a list for a sequence of calls (see ``calls``)
@@ -545,7 +553,7 @@ class SimpleTest(Test):
     constructor_args: list[Any] = []
     constructor_kwargs: dict[str, Any] = {}
     # whether the test runs in a temporary working directory of its own (see
-    # ``Test._isolation``)
+    # ``Test._working_directory``)
     isolated: bool = False
 
     def __init__(
@@ -643,7 +651,7 @@ class SimpleTest(Test):
 
     def run(self, trace: Trace | None = None) -> None:
         trace = trace if self.traceable else None
-        with self._isolation():
+        with self._working_directory():
             self._run(trace)
 
     def _run(self, trace: Trace | None) -> None:
@@ -846,7 +854,7 @@ class GeneralTest(Test):
     as a module.
 
     With ``isolated``, each test runs in a temporary working directory of its own,
-    which is deleted afterwards (see ``Test._isolation``).
+    which is deleted afterwards (see ``Test._working_directory``).
     """
 
     source: str
@@ -855,7 +863,7 @@ class GeneralTest(Test):
     # does
     traceable: bool = True
     # whether the test runs in a temporary working directory of its own (see
-    # ``Test._isolation``). Only stored if set.
+    # ``Test._working_directory``). Only stored if set.
     isolated: bool = False
 
     def __init__(
@@ -934,7 +942,9 @@ class SpecTest(Test):
         self.by_type = by_type
 
     def run(self, trace: Trace | None = None) -> None:
-        m = self.load_solution()
+        # the file's code runs as it is loaded, e.g. reading a file next to it
+        with self._working_directory():
+            m = self.load_solution()
         try:
             symb = _resolve(m, self.symbol_name)
         except AttributeError as err:

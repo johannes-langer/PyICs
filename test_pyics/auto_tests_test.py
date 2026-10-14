@@ -632,9 +632,12 @@ def test_isolated_tests_leave_no_files_behind(
     assert list(work.iterdir()) == []
     assert Path.cwd() == work
 
-    # without isolation, the file is written to the working directory
-    SimpleTest("t", relative, "write", ["out.txt"]).run()
-    assert [p.name for p in work.iterdir()] == ["out.txt"]
+    # without isolation, the file is written next to the exercise file, where the
+    # code runs, as students run it
+    SimpleTest("t", relative, "write", ["isolated.py", "out.txt"]).run()
+    assert (tmp_path / "ex" / "out.txt").read_text() == "written"
+    assert list(work.iterdir()) == []
+    assert Path.cwd() == work
 
 
 # --- PrintTest ---

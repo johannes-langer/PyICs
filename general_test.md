@@ -92,6 +92,8 @@ def test_greets(solution):
   loads it.
 - `traceable` and `isolated` work as for the other tests: tracing traces the code each
   test runs, and `isolated` runs each test in a temporary working directory of its own.
+  Otherwise each test runs in the directory of the exercise file, as for the other
+  tests, so the code finds the files next to it by relative paths.
 - Tests that use `load_solution` or `run_solution` are skipped while the tests run on a
   notebook's unsaved code (e.g. in pyics-jupyter's live runs). They run once the
   notebook is saved.
