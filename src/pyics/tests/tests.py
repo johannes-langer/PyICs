@@ -819,7 +819,7 @@ class SpecTest(Test):
     ``expected`` is either a spec dict (see ``check_specs``), or a class or function,
     which is converted into a spec dict so that the test can be stored as json. If
     ``by_type`` is set, parameters and attributes are matched by their type only, ignoring
-    their names and order.
+    their names and order. ``symbol_name`` can be dotted, e.g. ``Stack.push`` for a method.
     """
 
     symbol_name: str
@@ -844,7 +844,12 @@ class SpecTest(Test):
 
     def run(self, trace: Trace | None = None) -> None:
         m = self.load_solution()
-        symb = getattr(m, self.symbol_name)
+        try:
+            symb = _resolve(m, self.symbol_name)
+        except AttributeError as err:
+            raise AssertionError(
+                f"{Path(self.file_path).name} has no symbol {self.symbol_name!r}"
+            ) from err
 
         if diff := check_specs.compare_spec(self.expected, symb, by_type=self.by_type):
             raise MarkupAssertionError("\n".join(diff))

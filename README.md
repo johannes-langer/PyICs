@@ -125,7 +125,7 @@ Simple tests are unit tests run on student's code. A ``SimpleTest`` additionally
 
 Spec tests are signature checks on the student's code. A ``SpecTest`` additionally expects the following parameters:
 
-- ``symbol_name``: The name of the symbol where the expected signature needs to be located.
+- ``symbol_name``: The name of the symbol where the expected signature needs to be located. It can be dotted, e.g. ``Graph.out_degree`` to check a method of a class.
 - ``expected``: The expected signature. Pass a Type (class) or function/method here. It will be converted to a spec_dict, which can then be serialized and checked against.
 - ``by_type``: If this flag is set to true, check the signature based on type annotations instead of parameter/attribute names. This excludes the ``symbol_name``, which still needs to match.
 
