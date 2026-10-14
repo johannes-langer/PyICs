@@ -25,6 +25,7 @@ from pyics.notebook import cells, loader, sections
 from pyics.tests.capture import capture_stdout, provide_input
 from pyics.tests.trace import Trace
 from pyics.util import paths
+from pyics.util.imports import prepare_imports
 from pyics.util.paths import StrPath
 from . import check_specs, check_structure, compare
 
@@ -116,12 +117,16 @@ class Test(ABC):
         A notebook's code cells are run instead (see ``loader.run_notebook``), where an
         error in a cell doesn't stop the run. While a ``LIVE_SOURCE`` that holds the
         file is set, its module is returned instead, untraced.
+
+        Either can import the modules next to it, as when it runs as a script or in
+        Jupyter, anew each time (see ``prepare_imports``).
         """
         __tracebackhide__ = True  # tracebacks of a ``GeneralTest`` start in the file
         if (source := LIVE_SOURCE.get()) is not None and (
             module := source.module(self.file_path)
         ) is not None:
             return module
+        prepare_imports(self.file_path)
         if cells.is_notebook(self.file_path):
             return loader.load_module(self.file_path, as_main=as_main, trace=trace)
 
@@ -228,6 +233,7 @@ def run_script(
                 # a missing section fails the test before the notebook is run
                 sections.get_section(cells.read(test.file_path), section)
             # each cell's output is captured on its own
+            prepare_imports(test.file_path)
             run = loader.run_notebook(test.file_path, as_main=True, trace=trace)
             buffer.write(run.output(section=section))
         else:

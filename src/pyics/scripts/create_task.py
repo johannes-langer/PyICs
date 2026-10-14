@@ -47,6 +47,7 @@ from pyics.tests.tests import (
     check_source,
 )
 from pyics.util import paths
+from pyics.util.imports import prepare_imports
 from pyics.util.terminal import fullscreen
 
 _TOTAL_STEPS = 6
@@ -471,6 +472,7 @@ def _load_namespace(raw: str) -> tuple[dict[str, Any], str]:
     """
     path = _check_file(raw)
     problem = ""
+    prepare_imports(path)
     if cells.is_notebook(path):
         previous = sys.modules.get(_INFO_MODULE)
         try:
