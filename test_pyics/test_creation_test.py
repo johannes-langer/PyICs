@@ -26,6 +26,7 @@ from pyics.scripts.create_task import (
 )
 from pyics.tests.tests import (
     GeneralTest,
+    Make,
     PrintTest,
     Raises,
     SimpleTest,
@@ -551,6 +552,68 @@ def test_constructors_are_offered_from_the_info_file(
         ex_files,
     )  # fmt: skip
     assert test.constructor == "Stack"
+
+
+GRAPH_INFO = """
+class Graph:
+    def __init__(self, edges):
+        self.edges = edges
+
+edges = [("A", "B")]
+g = Graph(edges)
+"""
+
+
+def _texts(cli: MagicMock, method: str) -> str:
+    """Everything ``cli.<method>`` was called with, as plain text."""
+    console = Console(width=300, record=True, file=io.StringIO())
+    for call in getattr(cli, method).call_args_list:
+        console.print(call.args[0])
+    return console.export_text()
+
+
+def test_objects_of_the_info_file_are_rejected_for_make(
+    tmp_path: Path, ex_files: list[Path]
+) -> None:
+    info = tmp_path / "info.py"
+    info.write_text(GRAPH_INFO)
+    cli = MagicMock()
+    q: queue.Queue[str] = queue.Queue()
+    keys = [
+        ENTER, *_type(str(info)),  # reference the info file
+        *_type("t"), ENTER, ENTER, *_type("degree"),  # name, file_path, module, name
+        *_clear("[]"), *_type('[g, "A"]'),  # function_args: rejected, kept
+        *_clear('[g, "A"]'), *_type('[Make("Graph", edges), "A"]'),
+        ENTER, *_type("1"),  # function_kwargs, expected
+        ENTER, ENTER, ENTER,  # one call, traceable, isolated
+    ]  # fmt: skip
+    for key in [*keys, "\x03"]:
+        q.put(key)
+    test = PromptSession(cli, q).run(lambda s: _prompt_test(s, SimpleTest, ex_files))
+    assert q.get_nowait() == "\x03", "all keys were used"
+    assert isinstance(test, SimpleTest)
+    assert test.function_args == [Make("Graph", [("A", "B")]), "A"]
+    info_text = " ".join(_texts(cli, "update_info").split())
+    assert "holds a Graph of the test information file" in info_text
+    assert "use Make('Graph', ...) instead" in info_text
+
+
+def test_make_values_are_prefilled_as_code(ex_files: list[Path]) -> None:
+    current = SimpleTest(
+        "t", ex_files[0], "degree", 1, function_args=[Make("Graph", [("A", "B")]), "A"]
+    )
+    cli = MagicMock()
+    q: queue.Queue[str] = queue.Queue()
+    keys = [ENTER] * 11  # no info file, then keep everything
+    for key in [*keys, "\x03"]:
+        q.put(key)
+    test = PromptSession(cli, q).run(
+        lambda s: _prompt_test(s, SimpleTest, ex_files, current=current)
+    )
+    assert q.get_nowait() == "\x03", "all keys were used"
+    assert isinstance(test, SimpleTest)
+    assert test.function_args == current.function_args
+    assert "[Make('Graph', [('A', 'B')]), 'A']" in _texts(cli, "update_main_content")
 
 
 # --- GeneralTests ---

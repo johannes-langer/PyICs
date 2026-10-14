@@ -390,6 +390,75 @@ class Raises:
         return cls
 
 
+class Make:
+    """
+    A value of a ``SimpleTest`` (an argument, keyword argument, constructor argument or
+    expected value) that is created while the test runs, by calling ``name``, a class or
+    function of the exercise file (maybe dotted), with ``args`` and ``kwargs``, e.g.
+    ``Make("Graph", edges)``. So that the test uses the students' class, and only the
+    name and the arguments are stored. The arguments can be ``Make`` values, too.
+    """
+
+    name: str
+    args: list[Any]
+    kwargs: dict[str, Any]
+
+    def __init__(self, name: str, /, *args: Any, **kwargs: Any):
+        if not isinstance(name, str) or not all(
+            part.isidentifier() for part in name.split(".")
+        ):
+            raise TypeError(f"expected the name of a class or function, got {name!r}")
+        self.name = name
+        self.args = list(args)
+        self.kwargs = kwargs
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Make) and (other.name, other.args, other.kwargs) == (
+            self.name,
+            self.args,
+            self.kwargs,
+        )
+
+    __hash__ = None  # type: ignore[assignment]  # its arguments may be unhashable
+
+    def __repr__(self) -> str:
+        parts = [repr(self.name), *map(repr, self.args)]
+        parts += [f"{k}={v!r}" for k, v in self.kwargs.items()]
+        return f"Make({', '.join(parts)})"
+
+    def build(self, module: ModuleType) -> Any:
+        """Call ``name`` of ``module`` (the exercise file) with the arguments, which are
+        built first (see ``_build``)."""
+        args = _build(self.args, module)
+        kwargs = _build(self.kwargs, module)
+        return _resolve(module, self.name)(*args, **kwargs)
+
+
+def _build(value: Any, module: ModuleType) -> Any:
+    """``value`` with each ``Make`` in it, also in lists, tuples and dicts, replaced by
+    the value it builds from ``module``."""
+    if isinstance(value, Make):
+        return value.build(module)
+    if isinstance(value, list):
+        return [_build(v, module) for v in value]
+    if isinstance(value, tuple) and not hasattr(value, "_fields"):
+        return tuple(_build(v, module) for v in value)
+    if isinstance(value, dict):
+        return type(value)((k, _build(v, module)) for k, v in value.items())
+    return value
+
+
+def _contains_make(value: Any) -> bool:
+    """Whether ``value`` is or holds a ``Make``, also in lists, tuples and dicts."""
+    if isinstance(value, Make):
+        return True
+    if isinstance(value, (list, tuple)):
+        return any(_contains_make(v) for v in value)
+    if isinstance(value, dict):
+        return any(_contains_make(v) for v in value.values())
+    return False
+
+
 class Call(NamedTuple):
     """One call of a ``SimpleTest`` (see ``SimpleTest.calls``)."""
 
@@ -444,7 +513,8 @@ class SimpleTest(Test):
     names are looked up on the object it returns instead of the module. Names can be
     dotted (e.g. ``Stack.from_list``), and a name that isn't callable (e.g. a property)
     has its value compared. An ``expected`` value of ``Raises(...)`` expects the call to
-    raise that exception.
+    raise that exception. Arguments and expected values can be (or hold) ``Make(...)``
+    values, which create an object of the exercise file while the test runs.
 
     With ``isolated``, the test runs in a temporary working directory of its own, which
     is deleted afterwards (see ``Test._isolation``).
@@ -586,8 +656,12 @@ class SimpleTest(Test):
             args = copy.deepcopy(self.constructor_args)
             kwargs = copy.deepcopy(self.constructor_kwargs)
             text = _call_text(constructor, args, kwargs)
+            def construct() -> Any:
+                built_args, built_kwargs = _build(args, module), _build(kwargs, module)
+                return _resolve(module, constructor)(*built_args, **built_kwargs)
+
             try:
-                target = traced(lambda: _resolve(module, constructor)(*args, **kwargs))
+                target = traced(construct)
             except Exception as err:
                 raise AssertionError(
                     f"creating the object, {text} raised {_exception_text(err)}"
@@ -601,6 +675,17 @@ class SimpleTest(Test):
             args = copy.deepcopy(call.args)
             kwargs = copy.deepcopy(call.kwargs)
             text = prefix + _call_text(call.name, args, kwargs)
+            expected = call.expected
+            # built before the call, so that a ``Raises`` can't match their errors
+            if _contains_make([args, kwargs, expected]):
+                try:
+                    values = (args, kwargs, expected)
+                    args, kwargs, expected = traced(
+                        functools.partial(_build, values, module)
+                    )
+                except Exception as err:
+                    line = f"creating the values of {text} raised {_exception_text(err)}"
+                    raise AssertionError("\n".join([*transcript, line])) from err
 
             # these use the variables of this iteration, which they are only called in
             def invoke() -> Any:
@@ -654,11 +739,11 @@ class SimpleTest(Test):
                         f"{_exception_text(err)}"
                     )
                     raise AssertionError("\n".join([*transcript, line])) from err
-            if not compare.equal(res, call.expected):
+            if not compare.equal(res, expected):
                 fail(
                     f"{text} returned {_REPR.repr(res)}, expected "
                     f"{_REPR.repr(call.expected)}",
-                    compare.explain(res, call.expected),
+                    compare.explain(res, expected),
                 )
             transcript.append(f"{text} -> {_REPR.repr(res)}")
 

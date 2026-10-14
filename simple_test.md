@@ -97,6 +97,38 @@ Stack()
 1 == 2
 ```
 
+## Objects as arguments
+
+An argument that is an object of a class of the exercise file is given as `Make(...)`:
+the name of the class (or function, maybe dotted) and its arguments. Only these are
+stored, and the object is created while the test runs, from the students' class:
+
+```python
+from pyics.tests import Make, SimpleTest
+
+edges = [("A", "B"), ("B", "C")]
+SimpleTest(
+    "path from A to C",
+    "graphs.py",
+    "dfs",
+    ["A", "B", "C"],
+    function_args=[Make("Graph", edges), "A", "C"],
+)
+```
+
+While the test runs, this calls `dfs(Graph(edges), "A", "C")`, with the `Graph` of
+`graphs.py`.
+
+`Make` works in `function_args`, `function_kwargs`, `constructor_args`,
+`constructor_kwargs` and `expected` (compared with the class's `==`), also inside lists,
+tuples and dicts, and its own arguments can be `Make` values. Each call gets new objects.
+If creating one fails, e.g. because the exercise file has no such class, the test fails
+and names the call.
+
+Objects of classes that the test information file defines can't be stored in a task,
+since that file isn't there when the course runs. `create_task` rejects them and suggests
+`Make` instead, which is in scope when you enter a value.
+
 ## Dotted names, attributes and properties
 
 Names are looked up attribute by attribute. A name can reach an object the exercise

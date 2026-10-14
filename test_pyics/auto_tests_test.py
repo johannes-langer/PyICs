@@ -16,6 +16,7 @@ import pyics.util.json_handling as json
 from pyics.data import Task
 from pyics.tests.pytest_integration import LiveTestCollectionPlugin
 from pyics.tests.tests import (
+    Make,
     MarkupAssertionError,
     PrintTest,
     Raises,
@@ -464,6 +465,106 @@ def test_wrong_or_missing_exceptions_fail(stateful: Path) -> None:
     ]
     unknown = SimpleTest("t", stateful, "count", Raises("Undefined"))
     assert "Undefined is not an exception class" in _failure(unknown)[0]
+
+
+GRAPHS = """
+class Graph:
+    def __init__(self, edges, *, name=""):
+        if edges is None:
+            raise ValueError("no edges")
+        self.edges = list(edges)
+        self.name = name
+
+    def __eq__(self, other):
+        return isinstance(other, Graph) and other.edges == self.edges
+
+    def successors(self, node):
+        return [b for a, b in self.edges if a == node]
+
+def degree(g, node):
+    return (type(g).__module__, len(g.successors(node)))
+
+def degrees(graphs, node):
+    return [len(g.successors(node)) for g in graphs]
+
+def union(g, other=None):
+    return Graph(g.edges + other.edges)
+
+class Holder:
+    def __init__(self, g):
+        self.g = g
+
+    def size(self):
+        return len(self.g.edges)
+"""
+
+EDGES = [("A", "B"), ("A", "C"), ("B", "C")]
+
+
+@pytest.fixture
+def graphs(tmp_path: Path) -> Path:
+    path = tmp_path / "graphs.py"
+    path.write_text(GRAPHS)
+    return path
+
+
+def test_make_creates_objects_of_the_exercise_file(graphs: Path) -> None:
+    test = SimpleTest(
+        "t", graphs, "degree", ("current_solution", 2),
+        function_args=[Make("Graph", EDGES), "A"],
+    )  # fmt: skip
+    loaded = json.loads(json.dumps(test))
+    assert loaded.function_args[0] == Make("Graph", EDGES)
+    loaded.run()
+
+
+def test_make_in_lists_kwargs_constructors_and_expected_values(graphs: Path) -> None:
+    graph = Make("Graph", EDGES, name="g")
+    SimpleTest(
+        "t", graphs, "degrees", [2, 0], function_args=[[graph, Make("Graph", [])], "A"]
+    ).run()
+    SimpleTest(
+        "t", graphs, "union", Make("Graph", EDGES + EDGES),
+        function_args=[graph], function_kwargs={"other": graph},
+    ).run()  # fmt: skip
+    SimpleTest(
+        "t", graphs, "size", 3, constructor="Holder", constructor_args=[graph]
+    ).run()
+    wrong = SimpleTest(
+        "t", graphs, "union", Make("Graph", []), function_args=[graph],
+        function_kwargs={"other": graph},
+    )  # fmt: skip
+    assert "current_solution.Graph object" in _failure(wrong)[0]
+
+
+def test_make_failures_name_the_call(graphs: Path) -> None:
+    missing = SimpleTest(
+        "t", graphs, "degree", Raises(AttributeError),
+        function_args=[Make("Tree", EDGES), "A"],
+    )  # fmt: skip
+    (line,) = _failure(missing)
+    assert line.startswith("creating the values of degree(Make('Tree', ")
+    assert line.endswith(
+        "raised AttributeError: module 'current_solution' has no attribute 'Tree'"
+    )
+    raising = SimpleTest(
+        "t", graphs, "degree", 0, function_args=[Make("Graph", None), "A"]
+    )
+    assert "raised ValueError: no edges" in _failure(raising)[0]
+    constructor = SimpleTest(
+        "t", graphs, "size", 0, constructor="Holder",
+        constructor_args=[Make("Graph", None)],
+    )  # fmt: skip
+    assert "creating the object" in _failure(constructor)[0]
+
+
+def test_make_marker() -> None:
+    assert repr(Make("Graph", [("A", "B")], name="g")) == (
+        "Make('Graph', [('A', 'B')], name='g')"
+    )
+    assert Make("a.B", 1) == Make("a.B", 1) != Make("a.B", 2)
+    with pytest.raises(TypeError):
+        Make("not a name")
 
 
 def test_raises_marker() -> None:

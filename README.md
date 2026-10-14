@@ -119,7 +119,7 @@ Simple tests are unit tests run on student's code. A ``SimpleTest`` additionally
 - ``traceable``: Whether a detailed trace of the function can be displayed. Defaults to ``True``, can be turned off if the trace would give away too much of the solution (use sparingly).
 - ``isolated``: Whether the test runs in a temporary working directory of its own, which is deleted afterwards, e.g. to clean up files the student's code writes. Defaults to ``False``.
 
-``function_name``, ``function_args``, ``function_kwargs`` and ``expected`` can also be lists, with an item per call, for a sequence of calls, and ``expected`` can be ``Raises(...)`` for a call that must raise an exception. See the [``SimpleTest`` documentation](./simple_test.md).
+``function_name``, ``function_args``, ``function_kwargs`` and ``expected`` can also be lists, with an item per call, for a sequence of calls, and ``expected`` can be ``Raises(...)`` for a call that must raise an exception. Arguments and expected values can be ``Make(...)``, e.g. ``Make("Graph", edges)``, to create an object of the exercise file while the test runs: objects of classes that the test information file defines can't be stored in a task. Both markers are available from the ``pyics.tests`` module (``from pyics.tests import Make, Raises``), and are in scope when entering values in ``create_task``. See the [``SimpleTest`` documentation](./simple_test.md).
 
 ##### ``SpecTest``
 

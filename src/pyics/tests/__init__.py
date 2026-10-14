@@ -7,6 +7,7 @@ from .tests import (
     SizeTest,
     GeneralTest,
     Raises,
+    Make,
 )
 
 all = [
@@ -18,4 +19,5 @@ all = [
     "SizeTest",
     "GeneralTest",
     "Raises",
+    "Make",
 ]

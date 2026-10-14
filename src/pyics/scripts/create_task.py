@@ -38,6 +38,7 @@ from pyics.tests.tests import (
     Call,
     GeneralTest,
     Inherit,
+    Make,
     PrintTest,
     Raises,
     SimpleTest,
@@ -105,6 +106,18 @@ _RAISES_HINT = (
     "Raises(ValueError) expects the call to raise a ValueError, also one the "
     "exercise file defines, e.g. Raises('InsufficientFunds')."
 )
+_MAKE_HINT = (
+    "Make('Graph', edges) creates a Graph of the exercise file while the test runs. "
+    "Objects of the test information file's classes can't be stored."
+)
+# parameters of a ``SimpleTest`` whose values can be (or hold) ``Make`` values
+_MAKE_PARAMS = {
+    "function_args",
+    "function_kwargs",
+    "expected",
+    "constructor_args",
+    "constructor_kwargs",
+}
 # where the source of a ``GeneralTest`` comes from (see ``_prompt_source``)
 _KEEP_SOURCE = "Keep stored source"
 _FROM_FILE = "From a file"
@@ -510,17 +523,72 @@ def _check(test_cls: type[Test], param: inspect.Parameter, value: Any) -> Any:
         raise TypeError(
             f"expected a dict of keyword arguments, got {reprlib.repr(value)}"
         )
-    # checked now, rather than when the task file is written after all other fields
-    json.dumps(value)
+    # checked now, rather than when the task file is written after all other fields. Also
+    # read back, since not all that can be written can be read, e.g. an object of a class
+    # of the test information file, which isn't there when the course runs
+    try:
+        json.loads(json.dumps(value))
+    except Exception as err:
+        raise ValueError(_unstorable_message(value, err)) from err
     return value
+
+
+def _importable(cls: type) -> bool:
+    """Whether ``cls`` can be found by its module and name, as it is when it is read
+    from a task file. Only modules that are already imported are looked at."""
+    obj: Any = sys.modules.get(cls.__module__)
+    for part in cls.__qualname__.split("."):
+        obj = getattr(obj, part, None)
+    return obj is cls
+
+
+def _unstorable_class(value: Any) -> type | None:
+    """The class of the first object in ``value`` (also in lists, tuples, sets, dicts
+    and the attributes of objects) that can't be found by its module and name (see
+    ``_importable``), or None."""
+    seen: set[int] = set()
+
+    def walk(obj: Any) -> type | None:
+        if id(obj) in seen:
+            return None
+        seen.add(id(obj))
+        items: Any
+        if isinstance(obj, (list, tuple, set, frozenset)):
+            items = obj
+        elif isinstance(obj, dict):
+            items = obj.values()
+        elif not _importable(type(obj)):
+            return type(obj)
+        else:
+            items = vars(obj).values() if hasattr(obj, "__dict__") else ()
+        return next((c for c in map(walk, items) if c is not None), None)
+
+    return walk(value)
+
+
+def _unstorable_message(value: Any, err: Exception) -> str:
+    """Why ``value`` can't be stored in a task file, which raised ``err``."""
+    cls = _unstorable_class(value)
+    if cls is None:
+        return f"{reprlib.repr(value)} can't be stored in the task file: {err}"
+    if cls.__module__ in ("builtins", _INFO_MODULE):
+        origin = "of the test information file"
+    else:
+        origin = f"of {cls.__module__}"
+    return (
+        f"{reprlib.repr(value)} holds a {cls.__qualname__} {origin}, which can't be "
+        f"stored in the task file. To create one of the exercise file while the test "
+        f"runs, use Make({cls.__qualname__!r}, ...) instead."
+    )
 
 
 def _evaluates_to(code: str, value: Any) -> bool:
     """Whether ``code`` evaluates to ``value``, e.g. whether a ``repr`` is valid Python
-    that can prefill an input for ``value``. ``Raises`` is in scope, as it is for the
-    expected values of a ``SimpleTest``."""
+    that can prefill an input for ``value``. ``Raises`` and ``Make`` are in scope, as
+    they are for the values of a ``SimpleTest``."""
+    scope = {"__builtins__": builtins, "Raises": Raises, "Make": Make}
     try:
-        return bool(eval(code, {"__builtins__": builtins, "Raises": Raises}) == value)
+        return bool(eval(code, scope) == value)
     except Exception:  # noqa: BLE001
         return False
 
@@ -580,6 +648,9 @@ def _prompt_param(
     if test_cls is SimpleTest and param.name == "expected":
         scope["Raises"] = Raises
         lines.append(Text(_RAISES_HINT, style="dim"))
+    if test_cls is SimpleTest and param.name in _MAKE_PARAMS:
+        scope["Make"] = Make
+        lines.append(Text(_MAKE_HINT, style="dim"))
     if symbols:
         lines.append(Text("Variables in scope:", style="dim"))
         lines.extend(
