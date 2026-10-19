@@ -9,6 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from venv_helpers import VirtualEnv
 
 from pyics.distribution import archive, dependencies, sources
 from pyics.scripts import main
@@ -195,3 +196,26 @@ def test_errors_are_reported(pyics: Callable[..., str], tmp_path: Path) -> None:
         pyics("pack", str(tmp_path / "missing.json"))
     with pytest.raises(SystemExit, match="isn't a pulled course"):
         pyics("update", str(tmp_path))
+
+
+def test_user_wide_sources_are_moved_to_the_environment(
+    library: Path, virtual_env: VirtualEnv, pyics: Callable[..., str]
+) -> None:
+    url = (library / "index.json").as_uri()
+    legacy = virtual_env.write_legacy(sources.Source("demo", url))
+    warning = (
+        f"Detected user-wide sources at {legacy}. Sources have been moved to this "
+        "environment. Delete old source file? [y/N] "
+    )
+
+    out = pyics("sources", answers=("n",))
+    assert out == f"{warning}\ndemo  {url}\n"
+    assert legacy.is_file()
+    # asked again while the file is there, without adding its sources again
+    assert pyics("sources") == f"{warning}\n\ndemo  {url}\n"
+
+    assert pyics("sources", answers=("y",)) == (
+        f"{warning}\nDeleted {legacy}.\ndemo  {url}\n"
+    )
+    assert not legacy.exists()
+    assert pyics("sources") == f"demo  {url}\n"

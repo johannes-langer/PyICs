@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NoReturn
 
-from pyics.distribution import dependencies
+from pyics.distribution import dependencies, sources
 from pyics.distribution.dependencies import Problem
 from pyics.util import paths
 
@@ -35,6 +35,31 @@ def confirm(question: str, *, default: bool = False) -> bool:
     if not answer:
         return default
     return answer in ("y", "yes")
+
+
+def check_legacy_sources() -> None:
+    """If the user has sources stored for all environments, as by older versions of
+    pyics, move them to this environment (see ``sources.migrate_legacy_sources``) and
+    offer to delete them."""
+    try:
+        legacy = sources.migrate_legacy_sources()
+    except (sources.SourceError, OSError) as err:
+        print(f"warning: {err}")
+        return
+    if legacy is None:
+        return
+    question = (
+        f"Detected user-wide sources at {legacy}. Sources have been moved to this "
+        "environment. Delete old source file?"
+    )
+    if not confirm(question):
+        return
+    try:
+        sources.delete_legacy_sources(legacy)
+    except OSError as err:
+        print(f"warning: {legacy} can't be deleted: {err}")
+        return
+    print(f"Deleted {legacy}.")
 
 
 def warn_differing_notebooks(

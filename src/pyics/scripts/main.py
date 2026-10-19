@@ -9,6 +9,7 @@ from pyics.app.cli import CLI
 from pyics.util.logging import setup_logging
 from pyics.util.terminal import fullscreen
 from pyics.app.pyics import PyIC
+from pyics.scripts.console import check_legacy_sources
 from pyics.scripts.create_course import _create_course
 from pyics.scripts.create_task import _create_task
 from pyics.scripts.edit_course import _edit_course
@@ -107,6 +108,8 @@ def run():
         subcommands.add_subcommand(name, subparser, help=help)
 
     cfg = parser.parse_args()
+    # before the fullscreen interface, which can't ask plain questions
+    check_legacy_sources()
     if cfg.subcommand is None:
         main(log_level=cfg.log_level, log_file=cfg.log_file)
     else:

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from venv_helpers import VirtualEnv
 
 from pyics.data import Course, Task
 from pyics.distribution import archive, sources
@@ -29,6 +30,23 @@ def isolated_config(
     config = tmp_path_factory.mktemp("pyics-config")
     monkeypatch.setenv(sources.CONFIG_DIR_ENV, str(config))
     return config
+
+
+@pytest.fixture
+def virtual_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> VirtualEnv:
+    """pyics run in a virtual environment, without ``PYICS_CONFIG_DIR``, by a user
+    whose configuration and cache directories are temporary too, and with no sources
+    for all users."""
+    env = VirtualEnv(
+        tmp_path / "venv", tmp_path / "user-config", tmp_path / "user-cache"
+    )
+    monkeypatch.delenv(sources.CONFIG_DIR_ENV)
+    monkeypatch.setattr(sys, "prefix", str(env.prefix))
+    monkeypatch.setattr(sys, "base_prefix", str(tmp_path / "python"))
+    monkeypatch.setattr(sources, "user_config_dir", lambda: env.user_config)
+    monkeypatch.setattr(sources, "user_cache_dir", lambda: env.user_cache)
+    monkeypatch.setattr(sources, "site_config_dirs", list)
+    return env
 
 
 def write_course(
