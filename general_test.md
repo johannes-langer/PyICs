@@ -94,6 +94,8 @@ def test_greets(solution):
   test runs, and `isolated` runs each test in a temporary working directory of its own.
   Otherwise each test runs in the directory of the exercise file, as for the other
   tests, so the code finds the files next to it by relative paths.
+- With `soft=True`, every test the source defines is soft: a failing one is shown in
+  yellow, as a warning, and doesn't keep the task from counting as solved.
 - Tests that use `load_solution` or `run_solution` are skipped while the tests run on a
   notebook's unsaved code (e.g. in pyics-jupyter's live runs). They run once the
   notebook is saved.

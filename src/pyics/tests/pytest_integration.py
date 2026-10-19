@@ -232,6 +232,12 @@ class LiveTestCollectionPlugin:
     def pytest_configure(self, config: pytest.Config) -> None:
         general.register(config)
 
+    def _soft(self) -> bool:
+        """Whether the test that is running is soft (see ``Test.soft``)."""
+        if self._index is None or not 0 <= self._index < len(self.test_objs):
+            return False
+        return bool(getattr(self.test_objs[self._index], "soft", False))
+
     @pytest.hookimpl(tryfirst=True)
     def pytest_collection(self, session: pytest.Session):
         session.items = [
@@ -259,7 +265,7 @@ class LiveTestCollectionPlugin:
         that fails fails the call, so that no broken test goes missing.
         """
         self.reports.append(report)
-        result = TestResult.from_report(report, self._index)
+        result = TestResult.from_report(report, self._index, soft=self._soft())
         if report.when == "setup" and not report.passed:
             result = dataclasses.replace(result, when="call")
         elif report.when == "teardown" and report.failed:

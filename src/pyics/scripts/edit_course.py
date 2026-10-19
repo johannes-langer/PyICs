@@ -36,8 +36,9 @@ def _read_course(
     Returns
     -------
     tuple[dict[str, Any], dict[Path, int]]
-        The course's ``name`` and ``tasks`` (as ``_CourseTask``), and the progress of
-        its tasks, by their task files' absolute paths.
+        The course's ``name``, ``tasks`` (as ``_CourseTask``) and
+        ``free_navigation``, and the progress of its tasks, by their task files'
+        absolute paths.
     """
     tasks: list[_CourseTask] = []
     progress: dict[Path, int] = {}
@@ -53,7 +54,12 @@ def _read_course(
             continue
         taken = _names_taken_elsewhere(path, courses)
         tasks.append(_CourseTask(path, fields["name"], fields, taken))
-    return {"name": manifest.get("name", ""), "tasks": tasks}, progress
+    current = {
+        "name": manifest.get("name", ""),
+        "tasks": tasks,
+        "free_navigation": manifest.get("free_navigation") is True,
+    }
+    return current, progress
 
 
 def _edit_course(course_file: PathLike, max_depth: int = 3) -> None:
@@ -121,6 +127,7 @@ def _edit_course(course_file: PathLike, max_depth: int = 3) -> None:
                 name=fields["name"],
                 progress=[progress.get(paths.absolute(p), 0) for p in task_files],
                 metadata=manifest,  # e.g. its requires, which aren't edited here
+                free_navigation=fields["free_navigation"],
             )
             message = f"Course written to {fp}"
             if renamed:

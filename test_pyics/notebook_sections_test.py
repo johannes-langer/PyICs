@@ -634,6 +634,7 @@ def _structure_test(section_keys: list[str]) -> list[str]:
         ENTER,  # file_path
         *_type(repr(NO_LOOPS)),  # rules
         *section_keys,
+        ENTER,  # soft: keep False
     ]  # fmt: skip
 
 
@@ -678,7 +679,7 @@ def test_notebooks_without_sections_arent_asked_for_one(chdir: Path) -> None:
     plain = write_notebook(chdir / "plain.ipynb", ["x = 1"])
     assert _run_flow([], lambda s: _prompt_sections(s, [plain], {}, {})) == {}
     test = _run_flow(
-        [DOWN, ENTER, *_type("t"), ENTER, *_type(repr(NO_LOOPS))],
+        [DOWN, ENTER, *_type("t"), ENTER, *_type(repr(NO_LOOPS)), ENTER],
         lambda s: _prompt_test(s, StructureTest, [plain]),
     )
     assert "section" not in vars(test)
@@ -722,6 +723,7 @@ def test_editing_the_section_of_a_task_and_a_test(section_task: Path) -> None:
             DOWN, ENTER,  # edit the test
             ENTER, ENTER, ENTER, ENTER,  # info file: no; name, file_path, rules: keep
             DOWN, ENTER,  # section: the whole notebook, from the task's
+            ENTER,  # soft: keep False
             ENTER,  # done adding tests
         ],
         section_task,
@@ -750,7 +752,7 @@ def test_a_missing_section_is_kept_unless_changed(
 def test_editing_prefills_the_section_of_a_test(lecture: Path) -> None:
     current = StructureTest("t", lecture, NO_LOOPS, section="ex3")
     test = _run_flow(
-        [ENTER, ENTER, ENTER, ENTER, ENTER],  # keep everything
+        [ENTER] * 6,  # keep everything
         lambda s: _prompt_test(
             s, StructureTest, [lecture], current, task_sections={lecture: "ex2"}
         ),

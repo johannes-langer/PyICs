@@ -38,6 +38,7 @@ KEEP_ALL = [
     ENTER, ENTER, ENTER,  # keep A, B and C
     ENTER,  # done adding tasks
     ENTER,  # keep the order
+    ENTER,  # free navigation: keep it as it is
 ]  # fmt: skip
 
 # confirms every prompt of the edit flow for one of the fixture's tasks, after its name
@@ -191,7 +192,11 @@ def test_rename_in_courses(tmp_path: Path) -> None:
 
 def test_confirming_everything_keeps_the_course(course_file: Path) -> None:
     fields, _ = _edit(KEEP_ALL, course_file)
-    assert fields == {"name": "Course", "tasks": [(A, None), (B, None), (C, None)]}
+    assert fields == {
+        "name": "Course",
+        "tasks": [(A, None), (B, None), (C, None)],
+        "free_navigation": False,
+    }
 
 
 def test_rename_to_a_name_in_the_course_is_rejected(course_file: Path) -> None:
@@ -263,7 +268,8 @@ def test_found_tasks_of_the_course_are_not_offered(course_file: Path) -> None:
             UP, UP, ENTER,  # add an existing task
             ENTER,  # D, the only one not in the course yet
             ENTER,  # done adding tasks, preselected
-            ENTER,
+            ENTER,  # keep the order
+            ENTER,  # free navigation: keep it as it is
         ],
         course_file.absolute(),  # task paths are absolute, found ones relative
         found,
@@ -296,6 +302,18 @@ def test_script_keeps_the_courses_metadata(
     assert {k: _manifest(course_file).get(k) for k in metadata} == metadata
 
 
+def test_free_navigation_is_prefilled_and_can_be_turned_off(
+    course_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _manifest(course_file)
+    course_file.write_text(json.dumps({**manifest, "free_navigation": True}, indent=4))
+    _run_script(monkeypatch, KEEP_ALL, course_file)
+    assert _manifest(course_file)["free_navigation"] is True
+
+    _run_script(monkeypatch, [*KEEP_ALL[:-1], DOWN, ENTER], course_file)
+    assert "free_navigation" not in _manifest(course_file)
+
+
 def test_progress_follows_the_tasks(
     course_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -306,6 +324,7 @@ def test_progress_follows_the_tasks(
             DOWN, DOWN, ENTER,  # remove A
             ENTER, ENTER, ENTER,  # keep B and C, done
             SPACE, DOWN, SPACE, ENTER,  # move B below C
+            ENTER,  # free navigation: keep it as it is
         ],
         course_file,
     )  # fmt: skip
@@ -362,6 +381,7 @@ def test_new_task_is_written(
             *[DOWN] * len(_TEST_TYPES), ENTER,  # no tests
             ENTER,  # task file path: keep the default
             ENTER, ENTER,  # done, keep the order
+            ENTER,  # free navigation: keep it as it is
         ],
         course_file,
     )  # fmt: skip

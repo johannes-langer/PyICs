@@ -840,8 +840,8 @@ def _prompt_simple_test(
     """
     Interactively define a ``SimpleTest``: its name and file, whether it calls the
     functions of the module or the methods of an object (then also the constructor
-    and its arguments), the calls, one after the other, and whether it is traceable
-    and isolated. A call is stored as a single call, several as a sequence.
+    and its arguments), the calls, one after the other, and whether it is traceable,
+    isolated and soft. A call is stored as a single call, several as a sequence.
 
     Each call after the first is prefilled with the one before, so that a call is
     repeated by confirming each of its prompts. When editing the test ``current``,
@@ -945,6 +945,7 @@ def _prompt_simple_test(
 
     traceable = ask("traceable", bool, True, current_value("traceable"))
     isolated = ask("isolated", bool, False, current_value("isolated"))
+    soft = ask("soft", bool, False, current_value("soft"))
 
     if len(calls) == 1:  # stored as a single call
         (call,) = calls
@@ -963,6 +964,7 @@ def _prompt_simple_test(
         function_kwargs=kwargs,
         traceable=traceable,
         isolated=isolated,
+        soft=soft,
         **constructor,
     )
 
