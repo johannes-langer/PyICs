@@ -70,15 +70,11 @@ def test_outside_a_virtual_environment_sources_are_the_users(
 
 
 def test_user_wide_sources_are_moved_to_the_environment_once(
-    virtual_env: VirtualEnv, tmp_path: Path, source_adder: Callable[..., Source]
+    virtual_env: VirtualEnv,
 ) -> None:
-    lab = source_adder(_index(tmp_path / "lab/index.json"), "lab")
+    lab = Source("lab", "https://example.org/lab/index.json")
     uni = Source("uni", "https://example.org/uni/index.json")
-    legacy = virtual_env.write_legacy(
-        Source("lab", "https://example.org/other/index.json"),  # the name is taken
-        Source("lab-again", lab.url),  # the URL is added already
-        uni,
-    )
+    legacy = virtual_env.write_legacy(lab, uni)
     cached = _index(sources._cache_file(uni, virtual_env.user_cache), name="Uni")
 
     assert sources.migrate_legacy_sources() == legacy
@@ -88,10 +84,20 @@ def test_user_wide_sources_are_moved_to_the_environment_once(
     )
     assert legacy.is_file()  # deleted only if the user agrees
 
-    # a source removed afterwards doesn't come back, though the file is still there
+    # once the environment has sources of its own, the user's aren't looked for
     sources.remove_source("uni")
-    assert sources.migrate_legacy_sources() == legacy
+    assert sources.migrate_legacy_sources() is None
     assert sources.load_sources() == [lab]
+    assert sources.legacy_sources_file() == legacy
+
+
+def test_environments_with_sources_get_no_user_wide_ones(
+    virtual_env: VirtualEnv, tmp_path: Path, source_adder: Callable[..., Source]
+) -> None:
+    mine = source_adder(_index(tmp_path / "mine/index.json"), "mine")
+    virtual_env.write_legacy(Source("uni", "https://example.org/uni/index.json"))
+    assert sources.migrate_legacy_sources() is None
+    assert sources.load_sources() == [mine]
 
 
 def test_user_wide_sources_can_be_deleted(virtual_env: VirtualEnv) -> None:

@@ -38,9 +38,10 @@ def confirm(question: str, *, default: bool = False) -> bool:
 
 
 def check_legacy_sources() -> None:
-    """If the user has sources stored for all environments, as by older versions of
-    pyics, move them to this environment (see ``sources.migrate_legacy_sources``) and
-    offer to delete them."""
+    """If this environment has no sources of its own, but the user has sources stored
+    for all environments, as by older versions of pyics, move them to this environment
+    (see ``sources.migrate_legacy_sources``) and offer to delete them. Asked once per
+    environment: later, ``pyics remove_legacy_sources`` deletes them."""
     try:
         legacy = sources.migrate_legacy_sources()
     except (sources.SourceError, OSError) as err:
@@ -53,6 +54,7 @@ def check_legacy_sources() -> None:
         "environment. Delete old source file?"
     )
     if not confirm(question):
+        print("Kept it. Delete it any time with: pyics remove_legacy_sources")
         return
     try:
         sources.delete_legacy_sources(legacy)

@@ -208,14 +208,44 @@ def test_user_wide_sources_are_moved_to_the_environment(
         "environment. Delete old source file? [y/N] "
     )
 
-    out = pyics("sources", answers=("n",))
-    assert out == f"{warning}\ndemo  {url}\n"
+    assert pyics("sources", answers=("n",)) == (
+        f"{warning}\nKept it. Delete it any time with: pyics remove_legacy_sources\n"
+        f"demo  {url}\n"
+    )
     assert legacy.is_file()
-    # asked again while the file is there, without adding its sources again
-    assert pyics("sources") == f"{warning}\n\ndemo  {url}\n"
+    # asked once per environment
+    assert pyics("sources") == f"demo  {url}\n"
 
-    assert pyics("sources", answers=("y",)) == (
-        f"{warning}\nDeleted {legacy}.\ndemo  {url}\n"
+    out = pyics("remove_legacy_sources", answers=("n",))
+    assert out == (
+        f"Found user-wide sources at {legacy}:\n  demo  {url}\nDelete them? [y/N] \n"
+        "Cancelled, nothing was deleted.\n"
+    )
+    assert legacy.is_file()
+    out = pyics("remove_legacy_sources", answers=("y",))
+    assert out.endswith(f"Delete them? [y/N] \nDeleted {legacy}.\n")
+    assert not legacy.exists()
+    assert pyics("remove_legacy_sources") == "No user-wide sources found.\n"
+    assert pyics("sources") == f"demo  {url}\n"
+
+
+def test_user_wide_sources_can_be_deleted_when_moved(
+    virtual_env: VirtualEnv, pyics: Callable[..., str]
+) -> None:
+    legacy = virtual_env.write_legacy(
+        sources.Source("demo", "https://example.org/index.json")
+    )
+    out = pyics("sources", answers=("y",))
+    assert out.startswith(f"Detected user-wide sources at {legacy}.")
+    assert f"Deleted {legacy}.\n" in out
+    assert not legacy.exists()
+
+
+def test_remove_legacy_sources_without_asking(
+    virtual_env: VirtualEnv, pyics: Callable[..., str]
+) -> None:
+    legacy = virtual_env.write_legacy()
+    assert pyics("remove_legacy_sources", "--yes") == (
+        f"Found user-wide sources at {legacy}:\nDeleted {legacy}.\n"
     )
     assert not legacy.exists()
-    assert pyics("sources") == f"demo  {url}\n"

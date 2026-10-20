@@ -31,8 +31,8 @@ of a computer are in the site configuration directories (see ``site_config_dirs`
 last fetched index of each source is cached (see ``cache_dir``), so that the courses it
 lists are known without a connection.
 
-Sources used to be stored for the user in every environment. In a virtual environment,
-those are moved to the environment's own sources once (see ``migrate_legacy_sources``).
+Sources used to be stored for the user in every environment. A virtual environment
+without sources of its own gets those once (see ``migrate_legacy_sources``).
 """
 
 import hashlib
@@ -178,31 +178,9 @@ def _write_json(fp: Path, data: Any) -> None:
         raise
 
 
-def _migrated_from(fp: Path) -> list[str]:
-    """The legacy sources files whose sources were moved to the sources file ``fp``
-    (see ``migrate_legacy_sources``)."""
-    try:
-        migrated = json.loads(fp.read_text(encoding="utf-8")).get("migrated_from")
-    except (OSError, ValueError, AttributeError):
-        return []
-    return [str(m) for m in migrated] if isinstance(migrated, list) else []
-
-
-def _write_user_sources(
-    sources: Iterable[Source], migrated_from: list[str] | None = None
-) -> None:
-    """Write the sources in ``config_dir``, keeping the legacy sources files they were
-    moved from, unless given."""
-    fp = config_dir() / SOURCES_FILE
-    if migrated_from is None:
-        migrated_from = _migrated_from(fp)
-    data: dict[str, Any] = {
-        "version": 1,
-        "sources": [s.to_json() for s in sources if s.site is None],
-    }
-    if migrated_from:
-        data["migrated_from"] = migrated_from
-    _write_json(fp, data)
+def _write_user_sources(sources: Iterable[Source]) -> None:
+    data = {"version": 1, "sources": [s.to_json() for s in sources if s.site is None]}
+    _write_json(config_dir() / SOURCES_FILE, data)
 
 
 # --- sources stored for the user in all environments, by older versions ---
@@ -210,8 +188,9 @@ def _write_user_sources(
 
 def legacy_sources_file() -> Path | None:
     """
-    The sources file of the user, if there is one that should be moved to this
-    environment: only in a virtual environment, and unless ``PYICS_CONFIG_DIR`` is set.
+    The sources file of the user, as older versions of pyics stored it for all
+    environments, if there is one: only looked for in a virtual environment, and
+    unless ``PYICS_CONFIG_DIR`` is set.
     """
     if os.environ.get(CONFIG_DIR_ENV) or not in_virtual_env():
         return None
@@ -221,44 +200,35 @@ def legacy_sources_file() -> Path | None:
     return fp
 
 
+def legacy_sources(fp: Path) -> list[Source]:
+    """The sources in the user's sources file ``fp`` (see ``legacy_sources_file``)."""
+    return _read_sources(fp, site=False)
+
+
 def migrate_legacy_sources() -> Path | None:
     """
-    Move the sources of the user's sources file (see ``legacy_sources_file``) after the
-    environment's own, with their cached indexes, except those of a name or URL the
-    environment has already. This is done once per file: the environment's sources
-    file remembers it, so that a source removed afterwards doesn't come back.
+    If this environment has no sources file of its own yet, move the sources of the
+    user's sources file (see ``legacy_sources_file``) to it, with their cached indexes.
+    The user's file isn't looked for once the environment has its own, so this is done
+    once per environment.
 
     Returns
     -------
     Path | None
-        The user's sources file, if there is one, whether its sources were moved now
-        or before.
+        The user's sources file, if its sources were moved now.
     """
+    if (config_dir() / SOURCES_FILE).exists():
+        return None
     legacy = legacy_sources_file()
     if legacy is None:
         return None
-    own = config_dir() / SOURCES_FILE
-    migrated_from = _migrated_from(own)
-    if str(legacy.absolute()) in migrated_from:
-        return legacy
-
-    current = _read_sources(own, site=False)
-    names, urls = {s.name for s in current}, {s.url for s in current}
-    moved = []
-    for source in _read_sources(legacy, site=False):
-        if source.name in names or source.url in urls:
-            continue
-        names.add(source.name)
-        urls.add(source.url)
-        moved.append(source)
-    _write_user_sources([*current, *moved], [*migrated_from, str(legacy.absolute())])
-
+    moved = legacy_sources(legacy)
+    _write_user_sources(moved)
     for source in moved:
-        target = _cache_file(source)
         try:
-            if not target.exists():
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(_cache_file(source, user_cache_dir()), target)
+            target = _cache_file(source)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(_cache_file(source, user_cache_dir()), target)
         except OSError:
             pass  # the cache is only a convenience
     return legacy
@@ -268,7 +238,7 @@ def delete_legacy_sources(fp: Path) -> None:
     """Delete the user's sources file ``fp`` (see ``legacy_sources_file``), and the
     cached indexes of its sources."""
     try:
-        legacy = _read_sources(fp, site=False)
+        legacy = legacy_sources(fp)
     except SourceError:
         legacy = []
     for source in legacy:
