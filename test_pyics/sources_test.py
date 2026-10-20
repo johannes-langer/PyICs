@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from venv_helpers import VirtualEnv
 
 from pyics.distribution import archive, sources
 from pyics.distribution.sources import Source, SourceError
@@ -46,6 +47,79 @@ def test_config_dir_defaults_to_the_platforms(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv(sources.CONFIG_DIR_ENV)
     assert sources.config_dir().name == "pyics"
     assert sources.site_config_dirs()
+
+
+def test_sources_are_stored_in_the_virtual_environment(
+    virtual_env: VirtualEnv,
+) -> None:
+    assert sources.in_virtual_env()
+    assert sources.config_dir() == virtual_env.prefix / "etc" / "pyics"
+    assert sources.cache_dir() == virtual_env.prefix / "var" / "cache" / "pyics"
+
+
+def test_outside_a_virtual_environment_sources_are_the_users(
+    virtual_env: VirtualEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("sys.base_prefix", str(virtual_env.prefix))
+    assert not sources.in_virtual_env()
+    assert sources.config_dir() == virtual_env.user_config
+    assert sources.cache_dir() == virtual_env.user_cache
+    virtual_env.write_legacy(Source("uni", "https://example.org/index.json"))
+    assert sources.legacy_sources_file() is None
+    assert sources.migrate_legacy_sources() is None
+
+
+def test_user_wide_sources_are_moved_to_the_environment_once(
+    virtual_env: VirtualEnv,
+) -> None:
+    lab = Source("lab", "https://example.org/lab/index.json")
+    uni = Source("uni", "https://example.org/uni/index.json")
+    legacy = virtual_env.write_legacy(lab, uni)
+    cached = _index(sources._cache_file(uni, virtual_env.user_cache), name="Uni")
+
+    assert sources.migrate_legacy_sources() == legacy
+    assert sources.load_sources() == [lab, uni]
+    assert sources.cached_index(uni) == sources.parse_index(
+        json.loads(cached.read_text()), uni.url
+    )
+    assert legacy.is_file()  # deleted only if the user agrees
+
+    # once the environment has sources of its own, the user's aren't looked for
+    sources.remove_source("uni")
+    assert sources.migrate_legacy_sources() is None
+    assert sources.load_sources() == [lab]
+    assert sources.legacy_sources_file() == legacy
+
+
+def test_environments_with_sources_get_no_user_wide_ones(
+    virtual_env: VirtualEnv, tmp_path: Path, source_adder: Callable[..., Source]
+) -> None:
+    mine = source_adder(_index(tmp_path / "mine/index.json"), "mine")
+    virtual_env.write_legacy(Source("uni", "https://example.org/uni/index.json"))
+    assert sources.migrate_legacy_sources() is None
+    assert sources.load_sources() == [mine]
+
+
+def test_user_wide_sources_can_be_deleted(virtual_env: VirtualEnv) -> None:
+    uni = Source("uni", "https://example.org/uni/index.json")
+    legacy = virtual_env.write_legacy(uni)
+    cached = _index(sources._cache_file(uni, virtual_env.user_cache))
+    sources.migrate_legacy_sources()
+
+    sources.delete_legacy_sources(legacy)
+    assert not legacy.exists() and not cached.exists()
+    assert sources.legacy_sources_file() is None
+    assert sources.load_sources() == [uni]
+    assert sources.cached_index(uni) is not None
+
+
+def test_overridden_config_dir_moves_no_sources(
+    virtual_env: VirtualEnv, isolated_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(sources.CONFIG_DIR_ENV, str(isolated_config))
+    virtual_env.write_legacy(Source("uni", "https://example.org/index.json"))
+    assert sources.migrate_legacy_sources() is None
+    assert sources.load_sources() == []
 
 
 def test_sites_sources_come_after_the_users(

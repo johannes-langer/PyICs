@@ -56,6 +56,41 @@ def _remove_source(name: str) -> None:
     print(f"Removed the source {name!r}.")
 
 
+def _remove_legacy_sources(yes: bool = False) -> None:
+    """
+    Console script to delete the sources older versions of pyics stored for the user in
+    all environments, and their cached indexes. The sources of this environment stay.
+
+    Parameters
+    ----------
+    yes: bool
+        Don't ask for confirmation.
+    """
+    legacy = sources.legacy_sources_file()
+    if legacy is None:
+        print("No user-wide sources found.")
+        if not sources.in_virtual_env():
+            print(
+                "Outside a virtual environment, the user's sources are the ones in "
+                "use: remove one with: pyics remove_source <name>"
+            )
+        return
+    print(f"Found user-wide sources at {legacy}:")
+    try:
+        for source in sources.legacy_sources(legacy):
+            print(f"  {source.name}  {source.url}")
+    except SourceError as err:
+        print(f"warning: {err}")
+    if not yes and not confirm("Delete them?"):
+        print("Cancelled, nothing was deleted.")
+        return
+    try:
+        sources.delete_legacy_sources(legacy)
+    except OSError as err:
+        fail(err)
+    print(f"Deleted {legacy}.")
+
+
 def _sources() -> None:
     """Console script to list the course libraries (see ``add_source``)."""
     try:

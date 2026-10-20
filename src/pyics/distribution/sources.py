@@ -24,16 +24,22 @@ file), that lists courses by their slugs, the names they are pulled by::
 Each course is a zip archive (see ``archive``), whose ``url`` is relative to the index.
 ``build_index`` writes an index for a directory of archives.
 
-The sources are stored in ``sources.json`` in the user's configuration directory (see
-``config_dir``), and the sources an administrator configured for all users of a
-computer in the site configuration directories (see ``site_config_dirs``). The last
-fetched index of each source is cached (see ``cache_dir``), so that the courses it
+The sources are stored in ``sources.json`` in pyics' configuration directory (see
+``config_dir``): in a virtual environment, one of its own, so that each environment has
+its own sources, else the user's. The sources an administrator configured for all users
+of a computer are in the site configuration directories (see ``site_config_dirs``). The
+last fetched index of each source is cached (see ``cache_dir``), so that the courses it
 lists are known without a connection.
+
+Sources used to be stored for the user in every environment. A virtual environment
+without sources of its own gets those once (see ``migrate_legacy_sources``).
 """
 
 import hashlib
 import json
 import os
+import shutil
+import sys
 import tempfile
 import urllib.parse
 from collections.abc import Iterable, Sequence
@@ -60,12 +66,32 @@ class SourceError(Exception):
     """A source can't be added, removed or used, or a course can't be found in them."""
 
 
+def in_virtual_env() -> bool:
+    """Whether pyics runs in a virtual environment (venv, virtualenv, uv or conda)."""
+    return sys.prefix != sys.base_prefix or (Path(sys.prefix) / "conda-meta").is_dir()
+
+
+def user_config_dir() -> Path:
+    """The user's pyics configuration directory, e.g. ``~/.config/pyics`` on Linux."""
+    return Path(platformdirs.user_config_dir("pyics", appauthor=False))
+
+
+def user_cache_dir() -> Path:
+    """The user's pyics cache directory, e.g. ``~/.cache/pyics`` on Linux."""
+    return Path(platformdirs.user_cache_dir("pyics", appauthor=False))
+
+
 def config_dir() -> Path:
-    """The user's pyics configuration directory, e.g. ``~/.config/pyics`` on Linux,
-    unless overridden by the ``PYICS_CONFIG_DIR`` environment variable."""
+    """
+    The directory the sources are stored in: in a virtual environment, its
+    ``etc/pyics``, else the user's configuration directory (see ``user_config_dir``),
+    unless overridden by the ``PYICS_CONFIG_DIR`` environment variable.
+    """
     if override := os.environ.get(CONFIG_DIR_ENV):
         return Path(override)
-    return Path(platformdirs.user_config_dir("pyics", appauthor=False))
+    if in_virtual_env():
+        return Path(sys.prefix) / "etc" / "pyics"
+    return user_config_dir()
 
 
 def site_config_dirs() -> list[Path]:
@@ -78,10 +104,13 @@ def site_config_dirs() -> list[Path]:
 
 
 def cache_dir() -> Path:
-    """Where the last fetched index of each source is kept."""
+    """Where the last fetched index of each source is kept: in a virtual environment,
+    its ``var/cache/pyics``, else the user's cache directory."""
     if override := os.environ.get(CONFIG_DIR_ENV):
         return Path(override) / "cache"
-    return Path(platformdirs.user_cache_dir("pyics", appauthor=False))
+    if in_virtual_env():
+        return Path(sys.prefix) / "var" / "cache" / "pyics"
+    return user_cache_dir()
 
 
 @dataclass(frozen=True)
@@ -92,8 +121,8 @@ class Source:
     url: str
     # whether its index and archives may be fetched over plain http
     allow_http: bool = False
-    # the site configuration file it is configured in for all users, None if it is the
-    # user's own
+    # the site configuration file it is configured in for all users, None if it is one
+    # of the sources in ``config_dir``
     site: Path | None = None
 
     def to_json(self) -> dict[str, Any]:
@@ -122,7 +151,7 @@ def _read_sources(fp: Path, site: bool) -> list[Source]:
 
 
 def load_sources() -> list[Source]:
-    """The sources: the user's own first, then those configured for all users (unless
+    """The sources: those in ``config_dir`` first, then those configured for all users (unless
     the user has one of the same name), each in the order they were added. Courses are
     looked for in this order."""
     sources = _read_sources(config_dir() / SOURCES_FILE, site=False)
@@ -152,6 +181,69 @@ def _write_json(fp: Path, data: Any) -> None:
 def _write_user_sources(sources: Iterable[Source]) -> None:
     data = {"version": 1, "sources": [s.to_json() for s in sources if s.site is None]}
     _write_json(config_dir() / SOURCES_FILE, data)
+
+
+# --- sources stored for the user in all environments, by older versions ---
+
+
+def legacy_sources_file() -> Path | None:
+    """
+    The sources file of the user, as older versions of pyics stored it for all
+    environments, if there is one: only looked for in a virtual environment, and
+    unless ``PYICS_CONFIG_DIR`` is set.
+    """
+    if os.environ.get(CONFIG_DIR_ENV) or not in_virtual_env():
+        return None
+    fp = user_config_dir() / SOURCES_FILE
+    if not fp.is_file() or fp.absolute() == (config_dir() / SOURCES_FILE).absolute():
+        return None
+    return fp
+
+
+def legacy_sources(fp: Path) -> list[Source]:
+    """The sources in the user's sources file ``fp`` (see ``legacy_sources_file``)."""
+    return _read_sources(fp, site=False)
+
+
+def migrate_legacy_sources() -> Path | None:
+    """
+    If this environment has no sources file of its own yet, move the sources of the
+    user's sources file (see ``legacy_sources_file``) to it, with their cached indexes.
+    The user's file isn't looked for once the environment has its own, so this is done
+    once per environment.
+
+    Returns
+    -------
+    Path | None
+        The user's sources file, if its sources were moved now.
+    """
+    if (config_dir() / SOURCES_FILE).exists():
+        return None
+    legacy = legacy_sources_file()
+    if legacy is None:
+        return None
+    moved = legacy_sources(legacy)
+    _write_user_sources(moved)
+    for source in moved:
+        try:
+            target = _cache_file(source)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(_cache_file(source, user_cache_dir()), target)
+        except OSError:
+            pass  # the cache is only a convenience
+    return legacy
+
+
+def delete_legacy_sources(fp: Path) -> None:
+    """Delete the user's sources file ``fp`` (see ``legacy_sources_file``), and the
+    cached indexes of its sources."""
+    try:
+        legacy = legacy_sources(fp)
+    except SourceError:
+        legacy = []
+    for source in legacy:
+        _cache_file(source, user_cache_dir()).unlink(missing_ok=True)
+    fp.unlink(missing_ok=True)
 
 
 # --- indexes ---
@@ -285,11 +377,14 @@ def fetch_index(url: str, *, allow_http: bool = False) -> tuple[Index, Any]:
     return parse_index(data, url), data
 
 
-def _cache_file(source: Source) -> Path:
+def _cache_file(source: Source, directory: Path | None = None) -> Path:
+    """Where the index of ``source`` is cached, in ``directory`` (``cache_dir`` by
+    default)."""
     # the URL is hashed into the name, so the index of a source that is removed and
     # added again with another URL isn't mistaken for its old one
     digest = hashlib.sha256(source.url.encode()).hexdigest()[:16]
-    return cache_dir() / "indexes" / f"{source.name}-{digest}.json"
+    directory = cache_dir() if directory is None else directory
+    return directory / "indexes" / f"{source.name}-{digest}.json"
 
 
 def cache_index(source: Source, data: Any) -> None:

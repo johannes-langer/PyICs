@@ -9,6 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from venv_helpers import VirtualEnv
 
 from pyics.distribution import archive, dependencies, sources
 from pyics.scripts import main
@@ -195,3 +196,56 @@ def test_errors_are_reported(pyics: Callable[..., str], tmp_path: Path) -> None:
         pyics("pack", str(tmp_path / "missing.json"))
     with pytest.raises(SystemExit, match="isn't a pulled course"):
         pyics("update", str(tmp_path))
+
+
+def test_user_wide_sources_are_moved_to_the_environment(
+    library: Path, virtual_env: VirtualEnv, pyics: Callable[..., str]
+) -> None:
+    url = (library / "index.json").as_uri()
+    legacy = virtual_env.write_legacy(sources.Source("demo", url))
+    warning = (
+        f"Detected user-wide sources at {legacy}. Sources have been moved to this "
+        "environment. Delete old source file? [y/N] "
+    )
+
+    assert pyics("sources", answers=("n",)) == (
+        f"{warning}\nKept it. Delete it any time with: pyics remove_legacy_sources\n"
+        f"demo  {url}\n"
+    )
+    assert legacy.is_file()
+    # asked once per environment
+    assert pyics("sources") == f"demo  {url}\n"
+
+    out = pyics("remove_legacy_sources", answers=("n",))
+    assert out == (
+        f"Found user-wide sources at {legacy}:\n  demo  {url}\nDelete them? [y/N] \n"
+        "Cancelled, nothing was deleted.\n"
+    )
+    assert legacy.is_file()
+    out = pyics("remove_legacy_sources", answers=("y",))
+    assert out.endswith(f"Delete them? [y/N] \nDeleted {legacy}.\n")
+    assert not legacy.exists()
+    assert pyics("remove_legacy_sources") == "No user-wide sources found.\n"
+    assert pyics("sources") == f"demo  {url}\n"
+
+
+def test_user_wide_sources_can_be_deleted_when_moved(
+    virtual_env: VirtualEnv, pyics: Callable[..., str]
+) -> None:
+    legacy = virtual_env.write_legacy(
+        sources.Source("demo", "https://example.org/index.json")
+    )
+    out = pyics("sources", answers=("y",))
+    assert out.startswith(f"Detected user-wide sources at {legacy}.")
+    assert f"Deleted {legacy}.\n" in out
+    assert not legacy.exists()
+
+
+def test_remove_legacy_sources_without_asking(
+    virtual_env: VirtualEnv, pyics: Callable[..., str]
+) -> None:
+    legacy = virtual_env.write_legacy()
+    assert pyics("remove_legacy_sources", "--yes") == (
+        f"Found user-wide sources at {legacy}:\nDeleted {legacy}.\n"
+    )
+    assert not legacy.exists()
