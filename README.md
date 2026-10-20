@@ -39,7 +39,7 @@ Some courses need packages besides ``pyics``, e.g. ``numpy``. They have to be in
 The main app starts with a course selector, listing the course manifests found in the working directory and up to two directories below it (``.venv``, ``.git`` and the like are skipped). Once you have selected a course, <kbd>c</kbd> goes back to the course selector, and <kbd>esc</kbd> from there returns to the course that was left. Courses left this way resume where they were left.
 
 When a course is opened, it opens to the first unsolved task in the course. The main body of the app shows a number of tests which fail for the exercise file(s) for the current task, and a link to the file(s) at the very top.  
-Once all tests configured for a task pass, the task counts as completed. When that is the case <kbd>n</kbd> progresses to the next task, and <kbd>p</kbd> returns to the previous one.
+Once all tests configured for a task pass, the task counts as completed. When that is the case <kbd>n</kbd> progresses to the next task, and <kbd>p</kbd> returns to the previous one. Tests your instructor marked as _soft_ are shown in yellow when they fail: they point out something worth fixing, but don't keep the task from counting as completed. Some courses also let you move on with <kbd>n</kbd> before a task is completed.
 
 ##### Help Display
 
@@ -93,6 +93,8 @@ Similarly, solution files are provided as paths to existing files, but a task ca
 Finally, test creation is run interactively (see below for details on available tests). It is recommended to have a file ready which contains Python objects required for the tests, i.e. the parameters of the tests' constructors. If such a file is provided, the script allows you to select symbols for each of the parameters from those available in the provided file. This is particularly helpful for ``SpecTest``s, as the signatures can be inferred from class or function definitions in a file.  
 **Note:** If a symbol name matches a parameter name in the test's constructor, the symbol is automatically selected.
 
+``create_course`` also asks whether learners may move on to the next task before solving the current one. If so, the manifest stores ``"free_navigation": true``, and <kbd>n</kbd> always moves on. By default, a task has to be solved first.
+
 Existing tasks and courses can be edited using the following commands
 
 ```sh
@@ -106,6 +108,8 @@ The following tests can be configured. If a desired test can't be represented by
 
 - ``name``: The name of the test, displayed in the test results if the test fails.
 - ``file_path``: The path to the exercise file the test targets.
+
+Every test also takes ``soft``: a soft test that fails is shown in yellow, as a warning, and doesn't keep its task from counting as solved, e.g. for style checks or optional extras. Defaults to ``False``. A soft ``GeneralTest`` makes all the tests its code defines soft.
 
 ##### ``SimpleTest``
 

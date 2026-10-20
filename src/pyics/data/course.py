@@ -28,6 +28,9 @@ from pyics.util.logging import get_logger
 # requirements) and the pyics version it needs (``requires_pyics``).
 METADATA_KEYS = ("slug", "version", "description", "tags", "requires", "requires_pyics")
 
+# Besides, a manifest may set ``free_navigation``, which lets learners move on to the
+# next task before solving the current one (see ``Course.next``). Only stored if set.
+
 
 def _hints_view(hints: list[str], total: int) -> RenderableType:
     """The revealed ``hints`` of a task with ``total`` hints, numbered below a rule."""
@@ -57,6 +60,7 @@ class Course:
         progress: list[int],
         requires: Sequence[str] | None = None,
         check_progress: bool = False,
+        free_navigation: bool = False,
     ) -> None:
         """
         Parameters
@@ -76,8 +80,12 @@ class Course:
             according to ``progress``. If True, the progress is instead checked from the
             exercise files on disk, task by task in a background thread, and the course
             starts on the first task found unsolved (see ``loading``).
+        free_navigation: bool (optional, keyword only)
+            If True, ``next`` moves on to the next task even if the current one isn't
+            solved. Default is False.
         """
         self.name = name
+        self.free_navigation = free_navigation
         self.tasks = tasks
         self.requires = list(requires or [])
         self.__module_policy = ModulePolicy(self.requires)
@@ -295,15 +303,19 @@ class Course:
 
     def next(self) -> Task | None:
         """
-        Select the next task. If the current task is unsolved, returns the current task.
+        Select the next task. If the current task is unsolved, returns the current task,
+        unless the course allows ``free_navigation``.
 
         Returns
         -------
         Task | None
-            Next task if the current task is solved, otherwise current task. None while
-            the course is loading.
+            Next task if the current task is solved (or the course allows
+            ``free_navigation``), otherwise current task. None while the course is
+            loading.
         """
-        if self.__current_task is not None and self.__current_task.solved:
+        if self.__current_task is not None and (
+            self.free_navigation or self.__current_task.solved
+        ):
             current_task_number = self.__current_task_number()
 
             if current_task_number + 1 < len(self.__tasks_list):
@@ -425,6 +437,7 @@ class Course:
             progress=progress,
             requires=requires,
             check_progress=check_progress,
+            free_navigation=data.get("free_navigation") is True,
         )
 
     @staticmethod
@@ -436,6 +449,7 @@ class Course:
         use_task_names: bool = True,
         progress: Optional[list[int]] = None,
         metadata: Optional[Mapping[str, Any]] = None,
+        free_navigation: bool | None = None,
     ) -> Path:
         """
         Compose a course manifest from the provided ``task_files``. A course manifest is
@@ -463,7 +477,11 @@ class Course:
             no task solved yet.
         metadata: Mapping[str, Any] | None (optional, keyword only)
             The course's optional fields (see ``METADATA_KEYS``), e.g. those of the
-            manifest that is rewritten. Other keys are ignored.
+            manifest that is rewritten, and its ``free_navigation``. Other keys are
+            ignored.
+        free_navigation: bool | None (optional, keyword only)
+            Let learners move on before solving a task (see ``Course.next``). Stored
+            only if True. Default is None, i.e. as in ``metadata``.
 
         Returns
         -------
@@ -520,6 +538,12 @@ class Course:
         for key in METADATA_KEYS:
             if metadata and metadata.get(key) is not None:
                 manifest[key] = metadata[key]
+        if free_navigation is None:
+            free_navigation = (
+                metadata is not None and metadata.get("free_navigation") is True
+            )
+        if free_navigation:
+            manifest["free_navigation"] = True
 
         # serialized before the file is opened, so a manifest that is being edited isn't
         # left empty if serializing fails

@@ -47,6 +47,17 @@ def _failure_trace(result: TestResult) -> Text | None:
     return result.trace_text
 
 
+def _counts_as_passed(result: TestResult) -> bool:
+    """Whether ``result`` counts as passed towards solving its task: it passed, or its
+    test is soft (see ``Test.soft``)."""
+    return result.outcome == "passed" or result.soft
+
+
+def _failure_color(result: TestResult) -> str:
+    """The colour of the failed test of ``result``: yellow if it is soft, else red."""
+    return "bright_yellow" if result.soft else "bright_red"
+
+
 def _traceable(test: Test) -> bool:
     """Whether ``test`` can be traced, and its author allows it (see ``Test.run``)"""
     return test.supports_trace and getattr(test, "traceable", True)
@@ -270,9 +281,10 @@ class Task:
             self.__update_status()
 
     def __update_status(self) -> None:
-        # progress only counts the results of the saved files, never the overlay's
-        saved = [r.outcome == "passed" for r in self.test_results if r.when == "call"]
-        self.__solved = bool(saved) and round(100 * sum(saved) / len(saved)) == 100
+        # progress only counts the results of the saved files, never the overlay's.
+        # Soft tests that don't pass are warnings, which don't keep the task unsolved.
+        saved = [r for r in self.test_results if r.when == "call"]
+        self.__solved = bool(saved) and all(_counts_as_passed(r) for r in saved)
 
         results, lines = self.test_results, []
         if self.__overlay is not None:
@@ -286,15 +298,28 @@ class Task:
         relevant_reports = [r for r in results if r.when == "call"]
         passed = [r.outcome == "passed" for r in relevant_reports]
         failed_reports = [r for r in relevant_reports if r.outcome == "failed"]
+        n_soft_failed = sum(r.soft for r in failed_reports)
+        n_failed = len(failed_reports) - n_soft_failed
         pass_rate = round(100 * sum(passed) / len(passed)) if passed else 0
+        # green if all passed, yellow if only soft tests didn't, red otherwise
+        rate_color = (
+            "bright_red"
+            if not passed or not all(map(_counts_as_passed, relevant_reports))
+            else "bright_green"
+            if all(passed)
+            else "bright_yellow"
+        )
 
         # result summary, box=None so the row reaches the panel's own border
         summary = Table(expand=True, show_header=False, box=None, padding=0)
         summary.add_column()
         summary.add_column(justify="right")
         summary.add_row(
-            "".join("[bright_green].[/]" if ok else "[bright_red]F[/]" for ok in passed),
-            f"[{'bright_green' if pass_rate == 100 else 'bright_red'}]{pass_rate}%[/]",
+            "".join(
+                "[bright_green].[/]" if ok else f"[{_failure_color(r)}]F[/]"
+                for r, ok in zip(relevant_reports, passed)
+            ),
+            f"[{rate_color}]{pass_rate}%[/]",
         )
 
         sections: list[RenderableType] = [summary, *lines]
@@ -308,22 +333,22 @@ class Task:
             )
 
         if failed_reports:
-            failures = [(r.nodeid, _failure_text(r)) for r in failed_reports]
-            traces = [_failure_trace(r) for r in failed_reports]
-
             # one rule + traceback per failure, mirroring pytest's own failure sections
             sections.append(
                 Padding(Rule("[white]FAILURES[/]", style="white"), pad=(1, 0, 0, 0))
             )
-            for (nodeid, text), trace in zip(failures, traces):
+            for r in failed_reports:
+                color = _failure_color(r)
+                title = Text(r.nodeid, style=f"bold {color}")
+                if r.soft:
+                    title.append(" (soft)", style=color)
                 failure: list[RenderableType] = [
-                    Padding(
-                        Rule(Text(nodeid, style="bold bright_red"), style="bright_red"),
-                        pad=(1, 0, 0, 0),
+                    Padding(Rule(title, style=color), pad=(1, 0, 0, 0)),
+                    Text.assemble(
+                        _failure_text(r), style="yellow" if r.soft else "red"
                     ),
-                    Text.assemble(text, style="red"),
                 ]
-                if trace is not None:
+                if (trace := _failure_trace(r)) is not None:
                     failure += [
                         Padding(
                             Rule(Text("trace", style="dim"), style="dim"),
@@ -342,28 +367,34 @@ class Task:
             )
             sections += [
                 Text.assemble(
-                    f"FAILED {nodeid} - ",
-                    Text(" ").join(text.split()),
-                    style="bright_red",
+                    f"{'SOFT-FAILED' if r.soft else 'FAILED'} {r.nodeid} - ",
+                    Text(" ").join(_failure_text(r).split()),
+                    style=_failure_color(r),
                 )
-                for nodeid, text in failures
+                for r in failed_reports
             ]
 
         if relevant_reports:
-            n_failed, n_passed = len(failed_reports), sum(passed)
+            n_passed = sum(passed)
             duration = sum(r.duration for r in relevant_reports)
 
-            counts = Text()
-            if n_failed:
-                counts.append(f"{n_failed} failed", style="bold bright_red")
-            if n_failed and n_passed:
-                counts.append(", ", style="white")
-            if n_passed:
-                counts.append(f"{n_passed} passed", style="bright_green")
-            counts.append(
-                f" in {duration:.2f}s", style="bright_red" if n_failed else "bright_green"
+            counts = [
+                (f"{n_failed} failed", "bold bright_red", n_failed),
+                (f"{n_soft_failed} soft-failed", "bold bright_yellow", n_soft_failed),
+                (f"{n_passed} passed", "bright_green", n_passed),
+            ]
+            text = Text(", ", style="white").join(
+                Text(label, style=style) for label, style, n in counts if n
             )
-            sections.append(Padding(counts, pad=(1, 0, 0, 0)))
+            text.append(
+                f" in {duration:.2f}s",
+                style="bright_red"
+                if n_failed
+                else "bright_yellow"
+                if n_soft_failed
+                else "bright_green",
+            )
+            sections.append(Padding(text, pad=(1, 0, 0, 0)))
 
         self.__status = Group(*sections)
 

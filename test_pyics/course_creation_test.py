@@ -128,6 +128,7 @@ def test_existing_tasks_reordered() -> None:
             ENTER, ENTER,  # add an existing task: B, the only one left
             DOWN, ENTER,  # existing ones are all added, so: create new, done
             SPACE, DOWN, SPACE, ENTER,  # move A below B
+            ENTER,  # free navigation: keep no
         ],
         FOUND,
     )  # fmt: skip
@@ -137,6 +138,7 @@ def test_existing_tasks_reordered() -> None:
             (Path("sub/b.pyicstask.json"), None),
             (Path("a.pyicstask.json"), None),
         ],
+        "free_navigation": False,
     }
 
 
@@ -148,6 +150,7 @@ def test_back_from_reorder_returns_to_task_loop() -> None:
             ESC,  # back from reordering...
             ENTER,  # ...to the task menu, prefilled with done
             SPACE, DOWN, SPACE, ENTER,
+            ENTER,  # free navigation: keep no
         ],
         FOUND,
     )  # fmt: skip
@@ -155,6 +158,19 @@ def test_back_from_reorder_returns_to_task_loop() -> None:
         Path("sub/b.pyicstask.json"),
         Path("a.pyicstask.json"),
     ]
+
+
+def test_free_navigation_can_be_turned_on() -> None:
+    fields = _run(
+        [
+            *_type("Course"),
+            ENTER, ENTER, ENTER, ENTER, DOWN, ENTER,  # add A and B, done
+            ENTER,  # keep the order
+            UP, ENTER,  # free navigation: yes
+        ],
+        FOUND,
+    )  # fmt: skip
+    assert fields["free_navigation"] is True
 
 
 def test_done_not_offered_without_tasks() -> None:
@@ -192,6 +208,7 @@ def test_new_task_is_not_written(
             *[DOWN] * len(_TEST_TYPES), ENTER,  # no tests
             ENTER,  # task file path: keep the default
             DOWN, ENTER,  # done, no reordering for a single task
+            ENTER,  # free navigation: keep no
         ],
         {},
     )  # fmt: skip
