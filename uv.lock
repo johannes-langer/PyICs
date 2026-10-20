@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -461,7 +461,7 @@ wheels = [
 
 [[package]]
 name = "python-interactive-courses"
-version = "1.1.0"
+version = "1.0.3.dev1"
 source = { editable = "." }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },
