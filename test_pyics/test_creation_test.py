@@ -104,7 +104,7 @@ def test_symbols_from_info_file(tmp_path: Path, ex_files: list[Path]) -> None:
             ENTER,  # function_kwargs: keep {}
             *_type("exp"),  # expected
             ENTER,  # add another call: no
-            ENTER, ENTER,  # traceable, isolated: keep True and False
+            ENTER, ENTER, ENTER,  # traceable, isolated, soft: keep True, False, False
         ],
         ex_files,
     )  # fmt: skip
@@ -128,7 +128,7 @@ def test_missing_info_file_is_asked_again(tmp_path: Path, ex_files: list[Path]) 
             *_type(".py"),  # ...fixed, keeping the rejected input
             ENTER, ENTER,  # file_path, call functions of the module
             ENTER, ENTER, *_type("exp"),  # function_args, function_kwargs, expected
-            ENTER, ENTER, ENTER,  # one call, traceable, isolated
+            ENTER, ENTER, ENTER, ENTER,  # one call, traceable, isolated, soft
         ],
         ex_files,
     )  # fmt: skip
@@ -170,7 +170,7 @@ def test_invalid_expression_is_asked_again(ex_files: list[Path]) -> None:
             ENTER, ENTER,  # function_args, function_kwargs: defaults
             *_type("1 +"),  # expected: syntax error...
             *_type(" 1"),  # ...fixed, keeping the rejected input
-            ENTER, ENTER, ENTER,  # one call, traceable, isolated: defaults
+            ENTER, ENTER, ENTER, ENTER,  # one call, traceable, isolated, soft: defaults
         ],
         ex_files,
     )  # fmt: skip
@@ -189,7 +189,7 @@ def test_unusable_match_is_prompted_for(tmp_path: Path, ex_files: list[Path]) ->
             ENTER, ENTER,  # file_path, call functions of the module
             # function_name, expected: exact matches
             ENTER, ENTER,  # function_args, function_kwargs: defaults
-            ENTER, ENTER, ENTER,  # one call, traceable, isolated: defaults
+            ENTER, ENTER, ENTER, ENTER,  # one call, traceable, isolated, soft: defaults
         ],
         ex_files,
     )  # fmt: skip
@@ -206,7 +206,7 @@ def test_without_info_file(ex_files: list[Path]) -> None:
             *_type("f"),  # function_name
             ENTER, ENTER,  # function_args, function_kwargs: defaults
             *_type("1"),  # expected
-            ENTER, ENTER, ENTER,  # one call, traceable, isolated: defaults
+            ENTER, ENTER, ENTER, ENTER,  # one call, traceable, isolated, soft: defaults
         ],
         ex_files,
     )  # fmt: skip
@@ -226,11 +226,35 @@ def test_traceable_must_be_a_bool(ex_files: list[Path]) -> None:
             ENTER,  # add another call: no
             *[BACKSPACE] * len("True"), *_type("1"),  # traceable: not a bool...
             BACKSPACE, *_type("False"),  # ...fixed
-            ENTER,  # isolated: keep False
+            ENTER, ENTER,  # isolated, soft: keep False
         ],
         ex_files,
     )  # fmt: skip
     assert test.traceable is False
+
+
+def test_a_test_can_be_made_soft(ex_files: list[Path]) -> None:
+    test = _run(
+        [
+            DOWN, ENTER,  # reference a file: no
+            *_type("t"), ENTER, ENTER,  # name, file_path, call functions
+            *_type("f"), ENTER, ENTER, *_type("1"),  # one call
+            ENTER, ENTER, ENTER,  # add another call: no; traceable, isolated: keep
+            *[BACKSPACE] * len("False"), *_type("True"),  # soft
+        ],
+        ex_files,
+    )  # fmt: skip
+    assert test.soft is True
+
+    structure = _run_flow(
+        [
+            DOWN, ENTER, *_type("t"), ENTER,  # no info file, name, file_path
+            *_type('{"concept": "loop", "max": 0}'),  # rules
+            *[BACKSPACE] * len("False"), *_type("True"),  # soft
+        ],
+        lambda s: _prompt_test(s, StructureTest, ex_files),
+    )  # fmt: skip
+    assert isinstance(structure, StructureTest) and structure.soft is True
 
 
 def test_too_few_keys_cancels(ex_files: list[Path]) -> None:
@@ -253,7 +277,7 @@ def test_spec_from_function_in_scope(tmp_path: Path, ex_files: list[Path]) -> No
             *_type("t"),  # name
             ENTER,  # file_path; symbol_name: exact match
             *_type("depth_first_search"),  # expected: the function itself
-            ENTER,  # by_type: keep False
+            ENTER, ENTER,  # by_type, soft: keep False
         ],
         ex_files,
     )  # fmt: skip
@@ -269,7 +293,7 @@ def test_spec_from_matching_function(tmp_path: Path, ex_files: list[Path]) -> No
             ENTER, *_type(str(info)),
             *_type("t"),  # name
             ENTER,  # file_path; symbol_name, expected: exact matches
-            ENTER,  # by_type: keep False
+            ENTER, ENTER,  # by_type, soft: keep False
         ],
         ex_files,
     )  # fmt: skip
@@ -285,7 +309,7 @@ def test_malformed_spec_is_asked_again(ex_files: list[Path]) -> None:
             *_type("f"),  # symbol_name
             *_type("{}"),  # expected: no 'is_class' key...
             BACKSPACE, *_type('"is_class": False}'),  # ...fixed
-            ENTER,  # by_type: keep False
+            ENTER, ENTER,  # by_type, soft: keep False
         ],
         ex_files,
     )  # fmt: skip
@@ -306,7 +330,7 @@ def test_print_test_expected_output_spans_lines(ex_files: list[Path]) -> None:
             ENTER,  # file_path
             *"Name: Bob", ENTER, *"Hello, Bob!", CTRL_D,  # expected: enter adds a line
             BACKSPACE, BACKSPACE, *_type('["Bob"]'),  # inputs, prefilled with []
-            ENTER, ENTER,  # traceable, isolated: keep True and False
+            ENTER, ENTER, ENTER,  # traceable, isolated, soft: keep True, False, False
         ],
         ex_files,
     )  # fmt: skip
@@ -323,7 +347,7 @@ def test_print_test_from_info_file(tmp_path: Path, ex_files: list[Path]) -> None
         [
             ENTER, *_type(str(info)),  # reference the info file
             ENTER,  # file_path; name, expected, inputs: exact matches
-            ENTER, ENTER,  # traceable, isolated: keep True and False
+            ENTER, ENTER, ENTER,  # traceable, isolated, soft: keep True, False, False
         ],
         ex_files,
     )  # fmt: skip
@@ -343,7 +367,7 @@ def test_print_test_inputs_must_be_strings_in_a_list(
             CTRL_D,  # expected: no output
             BACKSPACE, BACKSPACE, *_type(rejected),  # inputs...
             *[BACKSPACE] * len(rejected), *_type('["Bob"]'),  # ...fixed
-            ENTER, ENTER,  # traceable, isolated: keep True and False
+            ENTER, ENTER, ENTER,  # traceable, isolated, soft: keep True, False, False
         ],
         ex_files,
     )  # fmt: skip
@@ -355,7 +379,7 @@ def test_print_test_is_offered(ex_files: list[Path]) -> None:
         [
             *[DOWN] * _TEST_TYPES.index(PrintTest), ENTER,  # PrintTest
             DOWN, ENTER, *_type("t"), ENTER,  # no info file, name, file_path
-            CTRL_D, ENTER, ENTER, ENTER,  # no output; keep inputs, traceable, isolated
+            CTRL_D, ENTER, ENTER, ENTER, ENTER,  # no output; keep the rest
             *[DOWN] * len(_TEST_TYPES), ENTER,  # done
         ],
         lambda s: _prompt_tests(s, ex_files),
@@ -371,6 +395,7 @@ def test_malformed_structure_rules_are_asked_again(ex_files: list[Path]) -> None
             ENTER,  # file_path
             *_type('{"concept": "loop", "max": -1}'),  # rules: negative max...
             *[BACKSPACE] * 3, *_type("0}"),  # ...fixed
+            ENTER,  # soft: keep False
         ],
         lambda s: _prompt_test(s, StructureTest, ex_files),
     )  # fmt: skip
@@ -420,7 +445,7 @@ def test_spec_from_a_solution_notebook(tmp_path: Path, ex_files: list[Path]) -> 
         ENTER, *_type(str(info)),  # reference the solution notebook
         DOWN, ENTER, *_type("t"),  # name: enter text
         ENTER,  # file_path; symbol_name, expected: exact matches
-        ENTER,  # by_type: keep False
+        ENTER, ENTER,  # by_type, soft: keep False
     ]  # fmt: skip
     for key in [*keys, "\x03"]:
         q.put(key)
@@ -466,6 +491,7 @@ def test_method_sequence(ex_files: list[Path]) -> None:
             ENTER,  # add another call: no
             ENTER,  # traceable: keep True
             *_clear("False"), *_type("True"),  # isolated
+            ENTER,  # soft: keep False
         ],
         ex_files,
     )  # fmt: skip
@@ -500,7 +526,7 @@ def test_edit_method_sequence(ex_files: list[Path]) -> None:
         UP, ENTER,  # add another call: yes, prefilled with call 3
         ENTER, ENTER, ENTER, *_clear("2"), *_type("Raises(IndexError)"),
         ENTER,  # add another call: no
-        ENTER, ENTER,  # traceable, isolated: keep
+        ENTER, ENTER, ENTER,  # traceable, isolated, soft: keep
     ]  # fmt: skip
     for key in [*keys, "\x03"]:
         q.put(key)
@@ -527,7 +553,7 @@ def test_a_single_call_is_stored_as_before(ex_files: list[Path]) -> None:
         [
             DOWN, ENTER, *_type("t"), ENTER, ENTER,  # name, file_path, module
             *_type("f"), ENTER, ENTER, *_type("Raises(ValueError)"),  # one call
-            ENTER, ENTER, ENTER,  # one call, traceable, isolated
+            ENTER, ENTER, ENTER, ENTER,  # one call, traceable, isolated, soft
         ],
         ex_files,
     )  # fmt: skip
@@ -547,7 +573,7 @@ def test_constructors_are_offered_from_the_info_file(
             ENTER,  # constructor: Stack, the first class or function
             ENTER, ENTER,  # constructor_args, constructor_kwargs
             *_type("pop"), ENTER, ENTER, *_type("None"),  # one call
-            ENTER, ENTER, ENTER,  # one call, traceable, isolated
+            ENTER, ENTER, ENTER, ENTER,  # one call, traceable, isolated, soft
         ],
         ex_files,
     )  # fmt: skip
@@ -585,7 +611,7 @@ def test_objects_of_the_info_file_are_rejected_for_make(
         *_clear("[]"), *_type('[g, "A"]'),  # function_args: rejected, kept
         *_clear('[g, "A"]'), *_type('[Make("Graph", edges), "A"]'),
         ENTER, *_type("1"),  # function_kwargs, expected
-        ENTER, ENTER, ENTER,  # one call, traceable, isolated
+        ENTER, ENTER, ENTER, ENTER,  # one call, traceable, isolated, soft
     ]  # fmt: skip
     for key in [*keys, "\x03"]:
         q.put(key)
@@ -604,7 +630,7 @@ def test_make_values_are_prefilled_as_code(ex_files: list[Path]) -> None:
     )
     cli = MagicMock()
     q: queue.Queue[str] = queue.Queue()
-    keys = [ENTER] * 11  # no info file, then keep everything
+    keys = [ENTER] * 12  # no info file, then keep everything
     for key in [*keys, "\x03"]:
         q.put(key)
     test = PromptSession(cli, q).run(
@@ -664,7 +690,7 @@ def test_general_test_from_a_file(
             ENTER,  # source: from a file
             *_type(str(tmp_path / "no_tests.py")),  # defines no tests...
             *_clear("no_tests.py"), *_type("test_add.py"),  # ...fixed
-            ENTER, ENTER,  # traceable, isolated: keep
+            ENTER, ENTER, ENTER,  # traceable, isolated, soft: keep
             ENTER,  # checked on the only solution file: keep
         ],
         ex_files,
@@ -682,7 +708,7 @@ def test_general_test_typed_in(ex_files: list[Path], solution: Path) -> None:
             DOWN, ENTER,  # source: type it
             *"def test_add(solution):", ENTER,
             *"    assert solution.add(1, 2) == 3", CTRL_D,
-            ENTER, ENTER, ENTER,  # traceable, isolated, keep
+            ENTER, ENTER, ENTER, ENTER,  # traceable, isolated, soft, keep
         ],
         ex_files,
         [solution],
@@ -703,7 +729,7 @@ def test_general_test_is_checked_against_the_solution(
         [
             DOWN, ENTER, *_type("general"), ENTER,
             ENTER, *_type(str(tmp_path / "failing.py")),  # source: from a file
-            ENTER, ENTER,  # traceable, isolated
+            ENTER, ENTER, ENTER,  # traceable, isolated, soft
             DOWN, ENTER,  # one test fails: edit again
             UP, ENTER, *_type(str(tmp_path / "fixed.py")),  # from another file
             ENTER,  # keep
@@ -731,7 +757,7 @@ def test_general_test_is_checked_against_the_solution(
     discarded, _ = _run_general(
         [
             DOWN, ENTER, *_type("general"), ENTER,
-            ENTER, *_type(str(tmp_path / "failing.py")), ENTER, ENTER,
+            ENTER, *_type(str(tmp_path / "failing.py")), ENTER, ENTER, ENTER,
             DOWN, DOWN, ENTER,  # discard
         ],
         ex_files,
@@ -758,8 +784,8 @@ def test_checks_are_cached_while_flows_are_replayed(
     _run_general(
         [
             DOWN, ENTER, *_type("cached"), ENTER,
-            ENTER, *_type(str(tmp_path / "cached.py")), ENTER, ENTER,
-            ESC, ENTER,  # back to isolated, and on again: replayed
+            ENTER, *_type(str(tmp_path / "cached.py")), ENTER, ENTER, ENTER,
+            ESC, ENTER,  # back to soft, and on again: replayed
             ENTER,  # keep
         ],
         ex_files,
@@ -771,7 +797,7 @@ def test_checks_are_cached_while_flows_are_replayed(
     _run_general(
         [
             DOWN, ENTER, *_type("cached"), ENTER,
-            ENTER, *_type(str(tmp_path / "cached.py")), ENTER, ENTER, ENTER,
+            ENTER, *_type(str(tmp_path / "cached.py")), ENTER, ENTER, ENTER, ENTER,
         ],
         ex_files,
         [solution],
@@ -788,7 +814,7 @@ def test_the_solution_with_the_exercise_files_name_is_chosen(
     (tmp_path / "test_add.py").write_text(GENERAL_SOURCE)
     keys = [
         DOWN, ENTER, *_type("general"), ENTER,
-        ENTER, *_type(str(tmp_path / "test_add.py")), ENTER, ENTER,
+        ENTER, *_type(str(tmp_path / "test_add.py")), ENTER, ENTER, ENTER,
     ]  # fmt: skip
     _, cli = _run_general([*keys, ENTER], ex_files, [solution, same_name])
     assert f"Checked on {same_name}: 1 passed, 0 failed" in _titles(cli)
