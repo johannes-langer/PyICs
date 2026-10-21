@@ -1,0 +1,1 @@
+PyICs instructor wiki · Generated from the [`wiki/` directory](https://github.com/johannes-langer/PyICs/tree/main/wiki) of the repository: edit the pages there, not here. · [Report a problem](https://github.com/johannes-langer/PyICs/issues)
