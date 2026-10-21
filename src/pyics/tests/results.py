@@ -53,6 +53,10 @@ class TestResult:
         The position of the test in the tests that were run, e.g. to match the results
         of different runs of a task's tests. None if unknown. The results of all tests
         that a ``GeneralTest`` collects share its index.
+    soft: bool
+        Whether the test is soft (see ``Test.soft``): if it failed, it is a warning,
+        which doesn't keep its task from counting as solved. False for results stored
+        before it was introduced.
     """
 
     __test__ = False  # not a test class, despite its name
@@ -64,6 +68,7 @@ class TestResult:
     message: str | None = None
     trace: str | None = None
     index: int | None = None
+    soft: bool = False
 
     @property
     def message_text(self) -> Text:
@@ -100,6 +105,8 @@ class TestResult:
         duration = float(_field(data, "duration", int, float))
         if not math.isfinite(duration):
             raise ValueError("'duration' must be finite")
+        # stored only since soft tests were introduced
+        soft = _field(data, "soft", bool) if "soft" in data else False
         return cls(
             nodeid=_field(data, "nodeid", str),
             when=_field(data, "when", str),
@@ -108,10 +115,13 @@ class TestResult:
             message=_field(data, "message", str, type(None)),
             trace=_field(data, "trace", str, type(None)),
             index=_field(data, "index", int, type(None)),
+            soft=soft,
         )
 
     @classmethod
-    def from_report(cls, report: pytest.TestReport, index: int | None = None) -> Self:
+    def from_report(
+        cls, report: pytest.TestReport, index: int | None = None, *, soft: bool = False
+    ) -> Self:
         """
         The result of the phase of a test ``report`` reports on, keeping the
         highlighting of the message and the trace of a ``PyicsItem``.
@@ -122,6 +132,8 @@ class TestResult:
             The report.
         index: int | None
             The position of the test in the tests that were run (see ``index``).
+        soft: bool (optional, keyword only)
+            Whether the test is soft (see ``soft``). Default is False.
         """
         # imported here, because pytest_integration builds results with this class
         from pyics.tests.pytest_integration import RichFailureRepr
@@ -143,4 +155,5 @@ class TestResult:
             message=message,
             trace=trace,
             index=index,
+            soft=soft,
         )

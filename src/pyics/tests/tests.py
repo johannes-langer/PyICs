@@ -89,6 +89,10 @@ class Test(ABC):
     # ``resolved_section``): None for the whole notebook, which is all that tests of
     # other kinds than ``PrintTest`` and ``StructureTest`` are about
     section: str | None | Inherit = None
+    # whether the test is soft: if it fails, it is shown as a warning (in yellow), and
+    # its task still counts as solved (see ``Task.solved``). Only stored if set, so
+    # tests stored before it was introduced, or without it, aren't soft.
+    soft: bool = False
     # whether the test runs the code in ``file_path``, which can then be traced (see
     # ``run``)
     supports_trace: ClassVar[bool] = False
@@ -303,6 +307,7 @@ class PrintTest(Test):
         traceable: bool = True,
         section: str | None | Inherit = INHERIT,
         isolated: bool = False,
+        soft: bool = False,
         **kwargs,
     ):
         if isinstance(inputs, str):
@@ -316,6 +321,8 @@ class PrintTest(Test):
             self.section = None if section is None else sections.check_name(section)
         if isolated:
             self.isolated = True
+        if soft:
+            self.soft = True
 
     def run(self, trace: Trace | None = None) -> None:
         _skip_live_run()
@@ -570,6 +577,7 @@ class SimpleTest(Test):
         constructor_kwargs: dict[str, Any] = {},
         traceable: bool = True,
         isolated: bool = False,
+        soft: bool = False,
         **kwargs,
     ):
         """
@@ -612,6 +620,8 @@ class SimpleTest(Test):
             raise ValueError("constructor arguments need a constructor")
         if isolated:
             self.isolated = True
+        if soft:
+            self.soft = True
 
     def calls(self) -> list[Call]:
         """The calls the test makes, in order: one, or a sequence (see
@@ -874,6 +884,7 @@ class GeneralTest(Test):
         *,
         traceable: bool = True,
         isolated: bool = False,
+        soft: bool = False,
         **kwargs,
     ):
         """
@@ -890,6 +901,8 @@ class GeneralTest(Test):
         self.traceable = traceable
         if isolated:
             self.isolated = True
+        if soft:  # all the tests it collects are soft
+            self.soft = True
 
     def run(self, trace: Trace | None = None) -> None:
         """
@@ -933,6 +946,7 @@ class SpecTest(Test):
         expected: check_specs.SpecType,
         *,
         by_type: bool = False,
+        soft: bool = False,
         **kwargs,
     ):
         self.name = name
@@ -940,6 +954,8 @@ class SpecTest(Test):
         self.symbol_name = symbol_name
         self.expected = check_specs.to_spec_dict(expected)
         self.by_type = by_type
+        if soft:
+            self.soft = True
 
     def run(self, trace: Trace | None = None) -> None:
         # the file's code runs as it is loaded, e.g. reading a file next to it
@@ -985,6 +1001,7 @@ class StructureTest(Test):
         rules: list[check_structure.Rule] | check_structure.Rule,
         *,
         section: str | None | Inherit = INHERIT,
+        soft: bool = False,
         **kwargs,
     ):
         self.name = name
@@ -992,6 +1009,8 @@ class StructureTest(Test):
         self.rules = check_structure.validate_rules(rules)
         if section is not INHERIT:
             self.section = None if section is None else sections.check_name(section)
+        if soft:
+            self.soft = True
 
     def run(self, trace: Trace | None = None) -> None:
         _skip_live_run()

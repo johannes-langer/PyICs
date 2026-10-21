@@ -204,3 +204,10 @@ Two things to keep in mind:
   modification times, so a save made during the test is picked up afterwards.
 - Isolated tests start in an empty directory. Data files that the code reads by a
   relative path aren't there, so don't isolate tests whose code reads files next to it.
+
+## Soft tests
+
+With `soft=True`, a failing test is shown in yellow, as a warning, and doesn't keep its
+task from counting as solved. Use it for checks that point out something worth fixing,
+but shouldn't block the student, e.g. an edge case beyond the task. All tests take
+`soft`.

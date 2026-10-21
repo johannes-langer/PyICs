@@ -9,13 +9,20 @@ from pyics.app.cli import CLI
 from pyics.util.logging import setup_logging
 from pyics.util.terminal import fullscreen
 from pyics.app.pyics import PyIC
+from pyics.scripts.console import check_legacy_sources
 from pyics.scripts.create_course import _create_course
 from pyics.scripts.create_task import _create_task
 from pyics.scripts.edit_course import _edit_course
 from pyics.scripts.edit_task import _edit_task
 from pyics.scripts.pack import _build_index, _pack
 from pyics.scripts.pull import _pull, _update
-from pyics.scripts.sources import _add_source, _remove_source, _search, _sources
+from pyics.scripts.sources import (
+    _add_source,
+    _remove_legacy_sources,
+    _remove_source,
+    _search,
+    _sources,
+)
 
 
 def main(*, log_level: str | int = 50, log_file: PathLike = Path("./.pyics.log")):
@@ -53,6 +60,10 @@ _SUBCOMMANDS = {
     "add_source": (_add_source, "Add a course library by the URL of its index."),
     "remove_source": (_remove_source, "Remove a course library."),
     "sources": (_sources, "List the course libraries."),
+    "remove_legacy_sources": (
+        _remove_legacy_sources,
+        "Delete the course libraries older versions stored for all environments.",
+    ),
     "search": (_search, "Find courses in the course libraries."),
     "pull": (_pull, "Pull a course by its name, or a course archive by URL or path."),
     "update": (_update, "Update a pulled course, keeping your work."),
@@ -107,6 +118,10 @@ def run():
         subcommands.add_subcommand(name, subparser, help=help)
 
     cfg = parser.parse_args()
+    # before the fullscreen interface, which can't ask plain questions; not before
+    # remove_legacy_sources, which asks itself
+    if cfg.subcommand != "remove_legacy_sources":
+        check_legacy_sources()
     if cfg.subcommand is None:
         main(log_level=cfg.log_level, log_file=cfg.log_file)
     else:

@@ -269,7 +269,7 @@ def test_edit_test_prefilled(task_file: Path) -> None:
             ENTER, ENTER, ENTER,  # function_name, function_args, function_kwargs: keep
             *_clear("1"), *_type("2"),  # expected
             ENTER,  # add another call: no
-            ENTER, ENTER,  # traceable, isolated: keep
+            ENTER, ENTER, ENTER,  # traceable, isolated, soft: keep
             ENTER,
         ],
         task_file,
@@ -292,7 +292,7 @@ def test_edit_test_of_a_removed_file(task_file: Path) -> None:
             ENTER,  # file_path: new.py, the only exercise file
             ENTER,  # call functions of the module
             ENTER, ENTER, ENTER, ENTER,  # keep the call
-            ENTER, ENTER, ENTER,  # one call, keep traceable and isolated
+            ENTER, ENTER, ENTER, ENTER,  # one call, keep traceable, isolated, soft
             ENTER,
         ],
         task_file,
@@ -317,7 +317,7 @@ def test_values_without_a_python_repr_are_prefilled_by_reference(
             ENTER,  # function_name
             ENTER,  # function_args, prefilled with a reference to the current value
             ENTER, ENTER,  # function_kwargs, expected
-            ENTER, ENTER, ENTER,  # one call, traceable, isolated
+            ENTER, ENTER, ENTER, ENTER,  # one call, traceable, isolated, soft
             ENTER,
         ],
         task_file,
@@ -337,7 +337,7 @@ def test_strings_are_prefilled_despite_test_information(task_file: Path) -> None
             ENTER, ENTER,  # file_path, call functions of the module
             ENTER, ENTER,  # function_name: enter text (preselected), keep it
             ENTER, ENTER, ENTER,  # function_args, function_kwargs, expected
-            ENTER, ENTER, ENTER,  # one call, traceable, isolated
+            ENTER, ENTER, ENTER, ENTER,  # one call, traceable, isolated, soft
             ENTER,
         ],
         task_file,

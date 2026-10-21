@@ -461,7 +461,7 @@ wheels = [
 
 [[package]]
 name = "python-interactive-courses"
-version = "1.0.2"
+version = "1.0.3"
 source = { editable = "." }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },

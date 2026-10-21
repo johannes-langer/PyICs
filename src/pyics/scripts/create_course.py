@@ -20,7 +20,14 @@ from pyics.app.prompts import (
 )
 from pyics.data.course import Course
 from pyics.data.task import Task
-from pyics.scripts.create_task import _EDIT, _KEEP, _REMOVE, _check_name, _task_flow
+from pyics.scripts.create_task import (
+    _EDIT,
+    _KEEP,
+    _REMOVE,
+    _check_name,
+    _confirm,
+    _task_flow,
+)
 from pyics.util import paths
 from pyics.util.discovery import TASK_SUFFIX, find_task_files
 from pyics.util.terminal import fullscreen
@@ -231,14 +238,16 @@ def _course_flow(
     back, so it must ask the same prompts given the same answers, and must not write any
     files.
 
-    With ``current``, the ``name`` and ``tasks`` (as ``_CourseTask``) of an existing
-    course, the course is edited instead: every prompt is prefilled with its current
-    value, so that confirming all of them leaves the course as it was.
+    With ``current``, the ``name``, ``tasks`` (as ``_CourseTask``) and
+    ``free_navigation`` of an existing course, the course is edited instead: every
+    prompt is prefilled with its current value, so that confirming all of them leaves
+    the course as it was.
 
     Returns
     -------
     dict[str, Any]
-        The course ``name``, and its ``tasks`` as ``_Entry`` tuples, in course order.
+        The course ``name``, its ``tasks`` as ``_Entry`` tuples, in course order, and
+        whether it allows ``free_navigation`` (see ``Course.next``).
     """
     s.cli.update_progress(0 / _TOTAL_STEPS)
     prompt = TextInput("Course name", initial=current["name"] if current else "")
@@ -251,8 +260,18 @@ def _course_flow(
     if len(order) > 1:
         order = s.ask(ReorderInput("Task order", order))
 
+    free_navigation = _confirm(
+        s,
+        "Let learners move on to the next task before solving the current one?",
+        default=bool(current and current.get("free_navigation")),
+    )
+
     s.cli.update_progress(3 / _TOTAL_STEPS)
-    return {"name": name, "tasks": [tasks[n] for n in order]}
+    return {
+        "name": name,
+        "tasks": [tasks[n] for n in order],
+        "free_navigation": free_navigation,
+    }
 
 
 def _create_course(fp: PathLike | None = None, max_depth: int = 3) -> None:
@@ -292,7 +311,10 @@ def _create_course(fp: PathLike | None = None, max_depth: int = 3) -> None:
                 task_files.append(path.absolute())
 
             fp = Course.create_course_manifest(
-                fp or Path(f"./{fields['name']}"), task_files, name=fields["name"]
+                fp or Path(f"./{fields['name']}"),
+                task_files,
+                name=fields["name"],
+                free_navigation=fields["free_navigation"],
             )
             cli.update_info(f"Course written to {escape(str(fp))}")
         except PromptCancelled:
