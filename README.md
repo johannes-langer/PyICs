@@ -8,7 +8,7 @@ PyICs is a framework for interactive Python tutorials, inspired by the _rustling
 
 ## Installation
 
-PyICs is available via ``pip``. Install the latest version using ``pip install python-interactive-courses``, requiring ``python>=3.14``. PyICs is available on Windows (Windows 10 or later), MacOS, and Linux.
+PyICs is available via ``pip``. Install the latest version using ``pip install python-interactive-courses``, requiring ``python>=3.14``. PyICs is available on Windows (Windows 10 or later), macOS, and Linux.
 
 ## Using the PyICs App
 
@@ -25,14 +25,14 @@ pyics pull search-algorithms    # pulls it into ./search-algorithms
 pyics                           # start it from the course selector
 ```
 
-- ``pyics pull`` can also take the URL or path of a course archive, and ``<source>/<course>`` if everal of your sources have a course of that name. ``--dest <directory>`` pulls it elsewhere.
+- ``pyics pull`` can also take the URL or path of a course archive, and ``<source>/<course>`` if several of your sources have a course of that name. ``--dest <directory>`` pulls it elsewhere.
 - ``pyics update`` (in the course's directory, or ``pyics update <directory>``) updates a pulled course to its latest version. Your exercise files are kept as they are, and so is your progress.
 - ``pyics sources`` lists your sources, and ``pyics remove_source <name>`` removes one. Sources are stored in the environment pyics is installed in, so each virtual environment has its own: in ``etc/pyics/sources.json`` inside it (its cached indexes in ``var/cache/pyics``). They stay when pyics is upgraded. Outside a virtual environment, they are stored in your pyics configuration directory (e.g. ``~/.config/pyics`` on Linux, ``~/Library/Application Support/pyics`` on macOS, ``%APPDATA%\pyics`` on Windows). Older versions of pyics stored sources there for all environments: a virtual environment without sources of its own gets a copy of them the first time pyics runs in it, and pyics asks once whether to delete the old file. ``pyics remove_legacy_sources`` deletes it any time later. Once it is deleted, environments that haven't copied the sources yet don't get them, so add them there again. Administrators can add sources for all users of a computer in the site configuration directory (e.g. ``/etc/xdg/pyics/sources.json``). The ``PYICS_CONFIG_DIR`` environment variable sets another configuration directory, whose sources are then the only ones used.
 - The course selector also offers the courses of your sources that you haven't pulled yet, as they were when you last added, searched or pulled from them. Selecting one pulls it into the working directory.
 
 > Courses run code on your computer, as their tests run your code together with theirs: only add sources and pull courses from people you trust. Sources are fetched over ``https`` (or from local files, e.g. on a network share); plain ``http`` has to be allowed with ``--allow_http``.
 
-Some courses need packages besides ``pyics``, e.g. ``numpy``. They have to be installed in the same environment where PyICs is installed, siunce the tests run in the same Python interpreter. ``pyics search`` and the course selector show which of them are missing, and ``pyics pull`` prints the command that installs them (or runs it with ``--install_deps``, after asking). Packages are never installed without asking.
+Some courses need packages besides ``pyics``, e.g. ``numpy``. They have to be installed in the same environment where PyICs is installed, since the tests run in the same Python interpreter. ``pyics search`` and the course selector show which of them are missing, and ``pyics pull`` prints the command that installs them (or runs it with ``--install_deps``, after asking). Packages are never installed without asking.
 
 #### Navigating Courses
 
@@ -43,7 +43,7 @@ Once all tests configured for a task pass, the task counts as completed. When th
 
 ##### Help Display
 
-Tasks can have hints (``help`` in the task file), which ``create_task`` and ``edit_task`` ask for after the instructions. In the main app, <kbd>h</kbd> reveals the current task's next hint above its test results, one at a time  and in order. Revealed hints stay revealed until the app is quit, also when you go to another task and back.
+Tasks can have hints (``help`` in the task file), which ``create_task`` and ``edit_task`` ask for after the instructions. In the main app, <kbd>h</kbd> reveals the current task's next hint above its test results, one at a time and in order. Revealed hints stay revealed until the app is quit, also when you go to another task and back.
 
 ##### Tracing Failed Tests
 
@@ -72,7 +72,7 @@ For a step-by-step guide, see the [instructor wiki](https://github.com/johannes-
 
 #### Courses and Tasks
 
-In its background PyICs distinguishes courses and tasks. A course packages multiple tasks, and is detected by PyICs in the current working directory (recursively, up to 3 layers deep) via its file extension (``.pyicscourse.json``). A course does **not** store any information on its tasks other than paths to the course files. This will most likely be addressed in a future version.
+Internally, PyICs distinguishes courses and tasks. A course packages multiple tasks, and is detected by PyICs in the current working directory (recursively, up to 3 layers deep) via its file extension (``.pyicscourse.json``). A course does **not** store any information on its tasks other than the paths to their task files. This will most likely be addressed in a future version.
 
 Tasks on the other hand package information on a single task, including the paths and contents of exercise and solution files, as well as serialized versions of the configured dynamic tests (see below).
 
@@ -97,7 +97,7 @@ Finally, test creation is run interactively (see below for details on available 
 
 ``create_course`` also asks whether learners may move on to the next task before solving the current one. If so, the manifest stores ``"free_navigation": true``, and <kbd>n</kbd> always moves on. By default, a task has to be solved first.
 
-Existing tasks and courses can be edited using the following commands
+Existing tasks and courses can be edited using the following commands:
 
 ```sh
 pyics edit_task path-to-task-file
@@ -115,12 +115,12 @@ Every test also takes ``soft``: a soft test that fails is shown in yellow, as a 
 
 ##### ``SimpleTest``
 
-Simple tests are unit tests run on student's code. A ``SimpleTest`` additionally expects the following parameters:
+Simple tests are unit tests run on students' code. A ``SimpleTest`` additionally expects the following parameters:
 
 - ``function_name``: The name of the function the test executes.
-- ``expected``: The expected result, i.e. output of the function wrt...
-- ``function_args``: Positional arguments to pass to the function in order to produce the expected output
-- ``function_kwargs``: Keyword arguments to pass to the function in order to produce the expected output
+- ``expected``: The expected result, i.e. the value the function returns for the given arguments.
+- ``function_args``: Positional arguments to pass to the function in order to produce the expected output.
+- ``function_kwargs``: Keyword arguments to pass to the function in order to produce the expected output.
 - ``constructor``: The name of a class (or function) of the exercise file that creates an object, whose methods are then called instead of the module's functions. Its arguments are ``constructor_args`` and ``constructor_kwargs``. Defaults to ``None``.
 - ``traceable``: Whether a detailed trace of the function can be displayed. Defaults to ``True``, can be turned off if the trace would give away too much of the solution (use sparingly).
 - ``isolated``: Whether the test runs in a temporary working directory of its own, which is deleted afterwards, e.g. to clean up files the student's code writes. Defaults to ``False``: tests run in the directory of the exercise file, as students run it, so that relative paths like ``open("edges.csv")`` work. This holds for all tests.
@@ -139,15 +139,15 @@ Spec tests are signature checks on the student's code. A ``SpecTest`` additional
 
 Structure tests can test _how_ tasks are solved by leveraging the ``ast`` builtin library. A ``StructureTest`` additionally expects the following parameter:
 
-- ``rules``: A list of rules enforced by this test. A detailed documentation on how these rules can be configured is found in the [``StructureTest`` documentation](./structure_test.md).
+- ``rules``: A list of rules enforced by this test. Detailed documentation on how these rules can be configured is found in the [``StructureTest`` documentation](./structure_test.md).
 
 ##### ``PrintTest``
 
-Print tests can test whether the stdout of students' files match a desired output. A ``PrintTest`` additionally expects the following parameters:
+Print tests can test whether the stdout of students' files matches a desired output. A ``PrintTest`` additionally expects the following parameters:
 
 - ``expected``: The expected output of the targeted file to stdout. The output of a Python file has to match it, while the output of a notebook only has to contain it (see [Jupyter Notebooks](#jupyter-notebooks)).
 - ``inputs``: A list of inputs to provide to the file in case the running script expects inputs (from the builtin ``input()`` function).
-- ``traceable``: Whether a detailed trace of teh function can be displayed. Defaults to ``True``, can be turned off if the trace would give away too much of the solution (use sparingly).
+- ``traceable``: Whether a detailed trace of the file's run can be displayed. Defaults to ``True``, can be turned off if the trace would give away too much of the solution (use sparingly).
 - ``isolated``: Whether the file runs in a temporary working directory of its own, which is deleted afterwards. Defaults to ``False``.
 
 ##### ``GeneralTest``
@@ -166,10 +166,10 @@ A course is distributed as an archive holding the course manifest and its task f
 pyics [options] pack [--out OUT] [--version VERSION] [--description DESCRIPTION] [--slug SLUG] [--tags TAGS [TAGS ...]] [--include INCLUDE [INCLUDE ...]] [--no_solutions] [--yes] manifest
 ```
 
-The ``--include`` option can be used to add other files the course needs (e.g. datasets), and ``--no_solutions`` removes the solution files from the tasks (if they existed). ``--version``, ``--description``, and ``--tags`` are stored in the manifest, so if a course is ever re-packed it will re-use the given values. ``--slug`` is the name a course is pulled by, and it is derived from the course's name unless an explicit name is provided via this option. ``--yes`` automatically accepts confirmation prompts.  
+The ``--include`` option can be used to add other files the course needs (e.g. datasets), and ``--no_solutions`` removes the solution files from the tasks (if they existed). ``--version``, ``--description``, and ``--tags`` are stored in the manifest, so if a course is ever repacked it will reuse the given values. ``--slug`` is the name a course is pulled by, and it is derived from the course's name unless an explicit name is provided via this option. ``--yes`` automatically accepts confirmation prompts.  
 ``pack`` also finds the packages the course uses besides ``pyics`` and the standard library (imported by its exercise and solution code, or needed for the values its tests store, like numpy arrays), and offers to declare those that aren't declared in the manifest's ``requires`` yet. A task file may only make PyICs import modules of the packages its course declares: any other module is refused before the task is loaded.
 
-``build`` indes lists the newest version of each course in the archives below the directory in ``index.json``.
+``build_index`` lists the newest version of each course in the archives below the directory in ``index.json``.
 
 ```sh
 pyics [options] build_index [--out OUT] [--name NAME] [directory]
@@ -196,7 +196,7 @@ Students add its URL with ``pyics add_source``. A course archive can also be pul
 }
 ```
 
-Archives are checked before anything of them is used: they can't write files outsinde the directory they are pulled to, their has h has to match the index, and they can only name the modules of the packages they declare.
+Archives are checked before anything in them is used: they can't write files outside the directory they are pulled to, their hash has to match the index, and they can only name the modules of the packages they declare.
 
 #### Jupyter Notebooks
 
@@ -208,6 +208,8 @@ Archives are checked before anything of them is used: they can't write files out
 - Keep the exercise notebooks in a visible directory, as ``examples/search_notebook`` does, rather than in ``.exercises/``: JupyterLab only opens notebooks in hidden directories if it runs with ``--ContentsManager.allow_hidden=True``.
 - ``pack`` finds the packages imported in the code cells of notebooks, too. If the course's ``requires`` don't declare them, it shows the ``%pip install`` (and ``!pip install``) lines of its notebooks as hints, e.g. ``lecture.ipynb (cell 2): %pip install numpy``. These lines do nothing in tests, so the packages have to be declared. ``pack`` also warns about tasks that share a notebook, but store different contents for it (see [Sections](#sections)).
 - An alternative that needs no notebook support is to pair a notebook with a Python file using [Jupytext](https://jupytext.readthedocs.io), and to use the ``.py`` file as the exercise file (magics are commented out in it). Students then need Jupytext in their Jupyter, and pairing tends to confuse beginners.
+
+##### Sections
 
 Sections link a task to a part of a notebook, e.g. to one exercise of a lecture's notebook that holds several.
 
