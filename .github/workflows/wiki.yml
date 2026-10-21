@@ -1,0 +1,61 @@
+name: Wiki
+
+# Publishes wiki/ (and the test reference docs) to the repository's GitHub wiki.
+# Pull requests only build the pages and check their links.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "wiki/**"
+      - "simple_test.md"
+      - "structure_test.md"
+      - "general_test.md"
+      - ".github/scripts/build_wiki.py"
+      - ".github/workflows/wiki.yml"
+  pull_request:
+    paths:
+      - "wiki/**"
+      - "simple_test.md"
+      - "structure_test.md"
+      - "general_test.md"
+      - ".github/scripts/build_wiki.py"
+      - ".github/workflows/wiki.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  wiki:
+    name: build and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # pushing to the wiki
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build the pages and check their links
+        run: python3 .github/scripts/build_wiki.py "$RUNNER_TEMP/wiki"
+      - name: Publish to the wiki
+        if: github.event_name != 'pull_request'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          if ! git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${REPO}.wiki.git" "$RUNNER_TEMP/wiki-repo"; then
+            echo "::error::Can't clone the wiki. Enable it in the repository's settings (Features > Wikis) and create its first page once at https://github.com/${REPO}/wiki, then run this workflow again."
+            exit 1
+          fi
+          # pages added in the wiki's web editor are kept; those of wiki/ are replaced
+          cp "$RUNNER_TEMP"/wiki/*.md "$RUNNER_TEMP/wiki-repo/"
+          cd "$RUNNER_TEMP/wiki-repo"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The wiki is up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update the wiki from ${GITHUB_SHA::7}"
+          git push

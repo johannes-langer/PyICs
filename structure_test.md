@@ -294,7 +294,7 @@ A missing `scope` is always reported, even inside `any` or `not`.
 
 ## Creating a StructureTest with `create_task`
 
-In `uv run create_task`, choose **StructureTest** when asked which kind of test to add.
+In `pyics create_task`, choose **StructureTest** when asked which kind of test to add.
 The prompts are:
 
 - `name`: text.
