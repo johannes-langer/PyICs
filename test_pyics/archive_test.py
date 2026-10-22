@@ -347,3 +347,60 @@ def test_tests_of_packed_courses_still_run(
     assert (root / ".exercises/add.py").read_text().startswith("def add")
     assert task.tests[0].file_path == root / ".exercises/add.py"
     assert isinstance(task.tests[0], SimpleTest)
+
+
+def test_relocate(course_dir: Path) -> None:
+    """The manifest and task files move into pyics_files, and the task files' paths
+    still point to the same files."""
+    _edit_task(
+        course_dir,
+        sections={"../.exercises/add.py": "add"},
+        data_file={"file_path": "../data.txt"},
+    )
+    moved = archive.relocate(course_dir)
+    assert moved == {
+        ".tasks/add.pyicstask.json": "pyics_files/.tasks/add.pyicstask.json",
+        "course.pyicscourse.json": "pyics_files/course.pyicscourse.json",
+    }
+    assert not (course_dir / ".tasks").exists()
+    task_file = course_dir / "pyics_files/.tasks/add.pyicstask.json"
+    data = json_handling.load_plain(task_file)
+    base = task_file.parent
+
+    def resolved(path: str | Path) -> Path:
+        return (base / path).resolve()
+
+    assert [resolved(p) for p in data["ex_files"]] == [
+        (course_dir / ".exercises/add.py").resolve()
+    ]
+    assert [resolved(p) for p in data["sol_files"]] == [
+        (course_dir / ".solutions/add.py").resolve()
+    ]
+    assert list(map(resolved, data["sections"])) == [
+        (course_dir / ".exercises/add.py").resolve()
+    ]
+    assert (
+        resolved(data["data_file"]["file_path"]) == (course_dir / "data.txt").resolve()
+    )
+
+    checked = archive.check_course(course_dir)
+    assert checked.manifest_path == course_dir / "pyics_files/course.pyicscourse.json"
+    assert checked.exercise_files == {course_dir / ".exercises/add.py"}
+    assert archive.relocate(course_dir) == {}  # in pyics_files already
+
+
+def test_relocate_leaves_the_layout_if_pyics_files_is_taken(course_dir: Path) -> None:
+    (course_dir / "pyics_files/.tasks").mkdir(parents=True)
+    (course_dir / "pyics_files/.tasks/add.pyicstask.json").write_text("mine")
+    assert archive.relocate(course_dir) == {}
+    assert (course_dir / ".tasks/add.pyicstask.json").is_file()
+
+
+def test_tests_of_relocated_courses_still_run(
+    course_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive.relocate(course_dir)
+    monkeypatch.setattr(Task, "run_tests", lambda self: None)
+    task = Task(course_dir / "pyics_files/.tasks/add.pyicstask.json")
+    assert (course_dir / ".exercises/add.py").read_text().startswith("def add")
+    assert task.tests[0].file_path == course_dir / ".exercises/add.py"

@@ -178,7 +178,7 @@ def test_pull_asks_before_pulling_by_url(
     assert "Cancelled" in pyics("pull", url, answers=("n",))
     assert not (tmp_path / "search-algorithms").exists()
     assert "Pulled" in pyics("pull", url, "--dest", "here", "--yes")
-    assert (tmp_path / "here/course.pyicscourse.json").is_file()
+    assert (tmp_path / "here/pyics_files/course.pyicscourse.json").is_file()
 
 
 def test_pull_installs_missing_packages(
