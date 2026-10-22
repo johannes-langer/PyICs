@@ -5,6 +5,7 @@ The ``pyics`` subcommands that distribute courses, run as from the command line:
 """
 
 import json
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -55,6 +56,18 @@ def library(tmp_path: Path, author: Path, pyics: Callable[..., str]) -> Path:
     return library
 
 
+def _packed_tasks(path: Path) -> list[dict]:
+    """The task files in the course archive at ``path``."""
+    with zipfile.ZipFile(path) as zf:
+        tasks = [
+            json.loads(zf.read(member))
+            for member in zf.namelist()
+            if member.endswith(".pyicstask.json")
+        ]
+    assert tasks
+    return tasks
+
+
 def test_pack(
     author: Path,
     tmp_path: Path,
@@ -73,6 +86,12 @@ def test_pack(
     assert manifest["tags"] == ["graphs", "search"]
     assert manifest["slug"] == "search-algorithms"  # fixed once packed
     assert manifest["requires_pyics"] == f">={dependencies.pyics_version()}"
+    for task in _packed_tasks(tmp_path / "search-algorithms-1.0.0.zip"):
+        assert task["sol_files"] == task["solution_code"] == []  # --no_solutions
+
+    pyics("pack", str(author), "--out", str(tmp_path / "with.zip"))
+    for task in _packed_tasks(tmp_path / "with.zip"):
+        assert task["sol_files"] and task["solution_code"]  # kept by default
 
 
 def test_pack_offers_to_declare_the_packages_the_course_uses(

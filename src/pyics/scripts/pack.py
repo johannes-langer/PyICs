@@ -63,7 +63,7 @@ def _pack(
     slug: str | None = None,
     tags: list[str] | None = None,
     include: list[str] | None = None,
-    no_solutions: bool = False,
+    solutions: bool = True,
     yes: bool = False,
 ) -> None:
     """
@@ -98,8 +98,9 @@ def _pack(
     include: list[str] | None
         Other files the course needs, e.g. data its exercises read, or directories of
         them.
-    no_solutions: bool
-        Leave the solutions out, e.g. for a course that is graded.
+    solutions: bool
+        Whether to keep the solutions. Leave them out with ``--no_solutions``, e.g.
+        for a course that is graded.
     yes: bool
         Don't ask for confirmation.
     """
@@ -145,7 +146,7 @@ def _pack(
             course,
             out,
             include=[Path(i) for i in include or []],
-            no_solutions=no_solutions,
+            no_solutions=not solutions,
         )
     except (ArchiveError, ValueError, OSError) as err:
         fail(err)
