@@ -6,6 +6,9 @@ and any other files the course needs, e.g. data its exercises read. Exercise and
 solution files aren't included: they are created from the task files once the course is
 started.
 
+Once extracted, ``relocate`` moves the manifest and task files into ``pyics_files/``,
+so that the student's files aren't mixed with pyics's own.
+
 Archives are checked before any of their contents is used: ``extract`` refuses entries
 that would end up outside the directory they are extracted to, and ``check_course``
 refuses courses whose task files would write files outside it, or make json_tricks
@@ -17,7 +20,7 @@ import os
 import stat
 import tempfile
 import zipfile
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import Any
@@ -33,7 +36,11 @@ from pyics.util import json_handling as json
 from pyics.util import paths
 from pyics.util.discovery import COURSE_SUFFIX, SKIP_DIRS, TASK_SUFFIX, find_files
 
-# written to the directory a course is pulled to (see ``pyics.distribution.pull``)
+# where a pulled course keeps its manifest, task files and origin file, so that its
+# directory holds the student's files only (see ``relocate``)
+PYICS_DIR = "pyics_files"
+# written to a pulled course's ``PYICS_DIR`` (see ``pyics.distribution.pull``, and
+# ``origin_path``), or, by older versions, to its directory
 ORIGIN_FILE = ".pyics-origin.json"
 MAX_ARCHIVE_BYTES = 100 * 2**20
 MAX_UNPACKED_BYTES = 500 * 2**20
@@ -49,6 +56,11 @@ _ZIP_DATE = (1980, 1, 1, 0, 0, 0)
 
 class ArchiveError(Exception):
     """A course can't be packed, or an archive isn't a valid course."""
+
+
+def origin_path(directory: Path) -> Path:
+    """Where the origin file of the course pulled to ``directory`` is written."""
+    return directory / PYICS_DIR / ORIGIN_FILE
 
 
 @dataclass(frozen=True)
@@ -99,10 +111,45 @@ def course_info(manifest: Mapping[str, Any], fallback_slug: str = "") -> CourseI
     )
 
 
+def _map_paths(data: Any, fn: Callable[[PurePath | str], Any]) -> Any:
+    """
+    A copy of a task file's ``data`` (as read by ``json_handling.loads_plain``), with
+    ``fn`` applied to each path it refers to: its ``PurePath`` objects (e.g. its
+    exercise and solution files), the strings stored as ``file_path`` (e.g. by a test)
+    or listed in ``ex_files`` and ``sol_files``, and the notebook paths its ``sections``
+    are keyed by.
+    """
+
+    def walk(obj: Any, key: Any = None) -> Any:
+        if isinstance(obj, PurePath):
+            return fn(obj)
+        if key == "file_path" and isinstance(obj, str):
+            return fn(obj)
+        if key in ("ex_files", "sol_files") and isinstance(obj, list):
+            return [fn(f) if isinstance(f, (str, PurePath)) else walk(f) for f in obj]
+        if isinstance(obj, dict):
+            mapped = {k: walk(v, k) for k, v in obj.items()}
+            if obj is data and isinstance(mapped.get("sections"), dict):
+                mapped["sections"] = {
+                    fn(k) if isinstance(k, str) else k: v
+                    for k, v in mapped["sections"].items()
+                }
+            return mapped
+        if isinstance(obj, list):
+            return [walk(v) for v in obj]
+        if isinstance(obj, tuple):
+            return tuple(walk(v) for v in obj)
+        if isinstance(obj, (set, frozenset)):
+            return type(obj)(walk(v) for v in obj)
+        return obj
+
+    return walk(data)
+
+
 def _task_files_paths(data: Mapping[str, Any], base: Path) -> tuple[list[Path], ...]:
     """
     The paths a task file's ``data`` (as read by ``json_handling.loads_plain``) refers
-    to, resolved relative to its directory ``base``.
+    to (see ``_map_paths``), resolved relative to its directory ``base``.
 
     Returns
     -------
@@ -120,22 +167,13 @@ def _task_files_paths(data: Mapping[str, Any], base: Path) -> tuple[list[Path], 
         return [paths.resolve(f, base) for f in files]
 
     exercises, solutions = resolved("ex_files"), resolved("sol_files")
-    referenced: list[Path] = [*exercises, *solutions]
+    referenced: list[Path] = []
 
-    def walk(obj: Any) -> None:
-        if isinstance(obj, PurePath):
-            referenced.append(paths.resolve(obj, base))
-        elif isinstance(obj, dict):
-            for key, value in obj.items():
-                if key == "file_path" and isinstance(value, str):
-                    referenced.append(paths.resolve(value, base))
-                else:
-                    walk(value)
-        elif isinstance(obj, (list, tuple, set, frozenset)):
-            for value in obj:
-                walk(value)
+    def collect(path: PurePath | str) -> PurePath | str:
+        referenced.append(paths.resolve(path, base))
+        return path
 
-    walk(data)
+    _map_paths(data, collect)
     return exercises, solutions, referenced
 
 
@@ -559,10 +597,21 @@ def _inside(root: Path, path: Path, what: str) -> Path:
     return path
 
 
+def _manifests(root: Path) -> list[Path]:
+    """The course manifests in the directory ``root`` (see ``find_manifest``),
+    relative to it."""
+    return [
+        rel
+        for rel in find_files(root, MANIFEST_DEPTH + 1, COURSE_SUFFIX)
+        if len(rel.parent.parts) <= MANIFEST_DEPTH or rel.parts[0] == PYICS_DIR
+    ]
+
+
 def find_manifest(root: Path) -> Path:
-    """The single course manifest in the directory ``root``, at most
-    ``MANIFEST_DEPTH`` directories below it."""
-    manifests = list(find_files(root, MANIFEST_DEPTH, COURSE_SUFFIX))
+    """The single course manifest in the directory ``root``: at most
+    ``MANIFEST_DEPTH`` directories below it, or one more in ``PYICS_DIR`` (see
+    ``relocate``)."""
+    manifests = _manifests(root)
     if len(manifests) != 1:
         raise ArchiveError(
             f"The course has {len(manifests)} course manifests instead of one"
@@ -612,7 +661,11 @@ def check_course(root: Path, fallback_slug: str = "") -> CheckedCourse:
         if not path.name.endswith(TASK_SUFFIX) or not path.is_file():
             raise ArchiveError(f"The task file of {name!r} is missing: {path}")
         task_paths[name] = path
-    own_files = {paths.absolute(manifest_path), paths.absolute(root / ORIGIN_FILE)}
+    own_files = {
+        paths.absolute(manifest_path),
+        paths.absolute(root / ORIGIN_FILE),
+        paths.absolute(origin_path(root)),
+    }
     own_files |= set(task_paths.values())
 
     policy = ModulePolicy(info.requires)
@@ -648,7 +701,7 @@ def exercise_files(root: Path) -> set[Path]:
     """The exercise files of the courses in the directory ``root``, as far as their
     manifests and task files can be read."""
     found: set[Path] = set()
-    for rel in find_files(root, MANIFEST_DEPTH, COURSE_SUFFIX):
+    for rel in _manifests(root):
         manifest_path = root / rel
         try:
             manifest = json.load_plain(manifest_path)
@@ -665,3 +718,73 @@ def exercise_files(root: Path) -> set[Path]:
                 continue
             found.update(paths.absolute(file) for file in exercises)
     return found
+
+
+def remove_empty_dirs(path: Path, root: Path) -> None:
+    """Remove the directories of ``path`` below ``root`` that are left empty."""
+    for parent in path.parents:
+        if parent == root or not parent.is_relative_to(root):
+            return
+        try:
+            parent.rmdir()
+        except OSError:  # not empty
+            return
+
+
+def relocate(root: Path) -> dict[str, str]:
+    """
+    Move the manifest and task files of the course in the directory ``root``, which
+    passed ``check_course``, into ``root / PYICS_DIR``, keeping their places relative
+    to each other, so that ``root`` holds the student's files only. The paths the task
+    files refer to (see ``_map_paths``) are rewritten to point to the same files as
+    before.
+
+    Nothing is moved if they are in ``PYICS_DIR`` already, or if a file there is in the
+    way.
+
+    Returns
+    -------
+    dict[str, str]
+        The files that were moved, relative to ``root``, mapped to where they are now.
+    """
+    root = paths.absolute(root)
+    target_dir = root / PYICS_DIR
+    manifest_path = paths.absolute(find_manifest(root))
+    if manifest_path.is_relative_to(target_dir):
+        return {}
+    manifest = json.load_plain(manifest_path)
+    task_paths = {
+        paths.absolute(paths.resolve(rel, manifest_path.parent))
+        for rel in manifest["tasks"].values()
+    }
+    moves = {
+        path: target_dir / path.relative_to(root)
+        for path in [manifest_path, *sorted(task_paths)]
+    }
+    if any(target.exists() for target in moves.values()):
+        return {}
+
+    def rebase(old_dir: Path, new_dir: Path) -> Callable[[PurePath | str], Any]:
+        def fn(path: PurePath | str) -> PurePath | str:
+            if PurePath(path).is_absolute():
+                return path
+            target = paths.absolute(paths.resolve(path, old_dir))
+            new = paths.relative_to(moves.get(target, target), new_dir)
+            return new if isinstance(path, PurePath) else new.as_posix()
+
+        return fn
+
+    for old, new in moves.items():
+        new.parent.mkdir(parents=True, exist_ok=True)
+        if old in task_paths:
+            data = _map_paths(json.load_plain(old), rebase(old.parent, new.parent))
+            new.write_text(json.dumps(data, indent=4), encoding="utf-8")
+            old.unlink()
+        else:
+            os.replace(old, new)
+    for old in moves:
+        remove_empty_dirs(old, root)
+    return {
+        old.relative_to(root).as_posix(): new.relative_to(root).as_posix()
+        for old, new in moves.items()
+    }

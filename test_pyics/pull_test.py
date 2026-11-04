@@ -6,6 +6,7 @@ touching the student's work.
 import functools
 import http.server
 import json
+import shutil
 import threading
 import zipfile
 from collections.abc import Callable, Iterator
@@ -15,7 +16,7 @@ import pytest
 
 from pyics.data import Course, Task
 from pyics.distribution import archive, dependencies, pull
-from pyics.distribution.archive import ORIGIN_FILE, ArchiveError
+from pyics.distribution.archive import ORIGIN_FILE, PYICS_DIR, ArchiveError, origin_path
 from pyics.distribution.pull import PullError
 from pyics.distribution.sources import Source
 
@@ -66,19 +67,71 @@ def _leftovers(directory: Path) -> list[str]:
 def test_pull_from_a_source(library: Path, student: Path) -> None:
     pulled = pull.pull("adding")
     assert pulled.directory == student / "adding"
-    assert pulled.manifest_path == student / "adding/course.pyicscourse.json"
+    assert (
+        pulled.manifest_path == student / "adding/pyics_files/course.pyicscourse.json"
+    )
     assert (pulled.info.title, pulled.info.version) == ("Adding", "1.0.0")
     assert pulled.problems == []
 
-    origin = json.loads((student / "adding" / ORIGIN_FILE).read_text())
+    origin = json.loads((student / "adding/pyics_files" / ORIGIN_FILE).read_text())
     assert origin["source"] == "lib"
     assert origin["slug"] == "adding"
     assert origin["course_version"] == "1.0.0"
-    assert origin["files"] == [".tasks/add.pyicstask.json", "course.pyicscourse.json"]
+    assert origin["files"] == [
+        "pyics_files/.tasks/add.pyicstask.json",
+        "pyics_files/course.pyicscourse.json",
+    ]
+    assert [p.name for p in (student / "adding").iterdir()] == [PYICS_DIR]
 
     course = Course.load_course_manifest(pulled.manifest_path)
     assert course.instructions == "Implement add(a, b)."
+    # the student's files are next to pyics_files, not in it
     assert (student / "adding/.exercises/add.py").is_file()
+    assert (student / "adding/.solutions/add.py").is_file()
+    assert sorted(p.name for p in (student / "adding/pyics_files").iterdir()) == [
+        ".pyics-origin.json",
+        ".tasks",
+        "course.pyicscourse.json",
+    ]
+
+
+def test_pull_keeps_flat_task_files_flat(
+    tmp_path: Path, student: Path, course_writer: Callable[..., Path]
+) -> None:
+    """Task files next to the manifest stay next to it in pyics_files."""
+    root = tmp_path / "flat"
+    manifest = course_writer(root)
+    task = root / ".tasks/add.pyicstask.json"
+    data = json.loads(task.read_text())
+    for key in ("ex_files", "sol_files"):
+        data[key] = [{"__pathlib__": f["__pathlib__"][3:]} for f in data[key]]
+    for test in data["tests"]:
+        attrs = test["attributes"]
+        attrs["file_path"] = {"__pathlib__": attrs["file_path"]["__pathlib__"][3:]}
+    (root / "add.pyicstask.json").write_text(json.dumps(data))
+    task.unlink()
+    archive.update_manifest(manifest, {"tasks": {"Add": "add.pyicstask.json"}})
+    zip_path = tmp_path / "flat.zip"
+    archive.pack(archive.read_course(manifest), zip_path)
+
+    pulled = pull.pull(str(zip_path))
+    assert (pulled.directory / "pyics_files/add.pyicstask.json").is_file()
+    Course.load_course_manifest(pulled.manifest_path)
+    assert (pulled.directory / ".exercises/add.py").is_file()
+
+
+def test_pull_an_archive_laid_out_already(
+    library: Path, student: Path, tmp_path: Path
+) -> None:
+    """A course packed from a pulled course isn't put in pyics_files twice."""
+    pulled = pull.pull("adding")
+    Course.load_course_manifest(pulled.manifest_path)
+    zip_path = tmp_path / "again.zip"
+    archive.pack(archive.read_course(pulled.manifest_path), zip_path)
+    again = pull.pull(str(zip_path), Path("again"))
+    assert again.manifest_path == student / "again/pyics_files/course.pyicscourse.json"
+    Course.load_course_manifest(again.manifest_path)
+    assert (student / "again/.exercises/add.py").is_file()
 
 
 def test_pull_a_course_of_a_source(library: Path, student: Path) -> None:
@@ -107,7 +160,7 @@ def test_pull_an_archive_by_path_and_url(
     zip_path = library / "adding-1.0.0.zip"
     pulled = pull.pull(str(zip_path))
     assert pulled.directory == student / "adding"  # by its manifest's slug
-    origin = json.loads((pulled.directory / ORIGIN_FILE).read_text())
+    origin = json.loads(origin_path(pulled.directory).read_text())
     assert origin["source"] is None and origin["url"] == zip_path.as_uri()
     assert pull.pull(zip_path.as_uri(), Path("again")).info.title == "Adding"
 
@@ -194,9 +247,10 @@ def test_update_keeps_the_students_work(
     assert updated.kept == ["data.txt"]
     assert (student / "adding/data.txt").read_text() == "mine"
     assert exercise.read_text().endswith("# my work\n")
-    task = json.loads((student / "adding/.tasks/add.pyicstask.json").read_text())
+    task_file = student / "adding/pyics_files/.tasks/add.pyicstask.json"
+    task = json.loads(task_file.read_text())
     assert task["instructions"] == "Implement add(a, b), again."
-    origin = json.loads((student / "adding" / ORIGIN_FILE).read_text())
+    origin = json.loads(origin_path(student / "adding").read_text())
     assert origin["course_version"] == "2.0.0"
     assert "data.txt" not in origin["files"]
 
@@ -217,7 +271,7 @@ def test_update_removes_files_the_new_version_dropped(
 
 def _pretend_pulled(course: Path, file: str) -> None:
     """Record ``file`` in the origin file of ``course`` as if it had been pulled."""
-    origin_file = course / ORIGIN_FILE
+    origin_file = origin_path(course)
     origin = json.loads(origin_file.read_text())
     origin["files"].append(file)
     origin_file.write_text(json.dumps(origin))
@@ -263,9 +317,44 @@ def test_update_never_removes_exercise_files(
 
 def test_update_with_force(library: Path, student: Path) -> None:
     pull.pull("adding")
-    (student / "adding/.tasks/add.pyicstask.json").unlink()
+    task_file = student / "adding/pyics_files/.tasks/add.pyicstask.json"
+    task_file.unlink()
     assert pull.update(Path("adding"), force=True).up_to_date is False
-    assert (student / "adding/.tasks/add.pyicstask.json").is_file()
+    assert task_file.is_file()
+
+
+def test_update_from_within_pyics_files(library: Path, student: Path) -> None:
+    pull.pull("adding")
+    updated = pull.update(student / "adding/pyics_files")
+    assert updated.directory == student / "adding"
+    assert updated.up_to_date
+
+
+def test_update_moves_courses_pulled_by_older_versions(
+    library: Path, student: Path, author: Path, publisher: Callable[..., Path]
+) -> None:
+    """A course pulled before pyics_files existed: its manifest, task files and origin
+    file next to the exercise files."""
+    pulled = pull.pull("adding")
+    origin = json.loads(origin_path(pulled.directory).read_text())
+    shutil.rmtree(pulled.directory)
+    data = (library / "adding-1.0.0.zip").read_bytes()
+    origin["files"] = archive.extract(data, pulled.directory)
+    (pulled.directory / ORIGIN_FILE).write_text(json.dumps(origin))
+    Course.load_course_manifest(pulled.directory / "course.pyicscourse.json")
+    exercise = student / "adding/.exercises/add.py"
+    exercise.write_text("# my work\n")
+    assert pull.find_origin(student / "adding/.exercises")[0] == pulled.directory
+
+    _new_version(author, library, publisher)
+    updated = pull.update(Path("adding"))
+    assert (
+        updated.manifest_path == student / "adding/pyics_files/course.pyicscourse.json"
+    )
+    assert exercise.read_text() == "# my work\n"
+    assert origin_path(pulled.directory).is_file()
+    for old in (ORIGIN_FILE, "course.pyicscourse.json", ".tasks"):
+        assert not (pulled.directory / old).exists()
 
 
 def test_update_after_the_source_was_removed(

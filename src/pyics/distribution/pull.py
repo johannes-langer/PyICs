@@ -1,10 +1,13 @@
 """
 Pulling courses: downloading a course archive, from one of the sources (see
 ``sources``) or from a URL or path, checking it (see ``archive``), and extracting it to
-a directory of its own, e.g. ``./search-algorithms``.
+a directory of its own, e.g. ``./search-algorithms``. The course's manifest and task
+files are kept in its ``pyics_files/`` (see ``archive.relocate``), so that the
+directory itself holds the exercise and solution files, and whatever else the student
+works with.
 
-That directory holds an origin file, ``.pyics-origin.json``, which records where the
-course came from and which files were pulled, so that the course can be updated (see
+``pyics_files/`` also holds an origin file, ``.pyics-origin.json``, which records where
+the course came from and which files were pulled, so that the course can be updated (see
 ``update``): an update replaces the files that were pulled, but never the exercise
 files that hold the student's work, nor any other file the student created.
 """
@@ -20,7 +23,12 @@ from pathlib import Path
 from typing import Any
 
 from pyics.distribution import archive, sources
-from pyics.distribution.archive import ORIGIN_FILE, CourseInfo
+from pyics.distribution.archive import (
+    ORIGIN_FILE,
+    CourseInfo,
+    origin_path,
+    remove_empty_dirs,
+)
 from pyics.distribution.dependencies import Problem, check, describe, install_hint
 from pyics.distribution.fetch import FetchError, fetch, is_url, scheme, to_url
 from pyics.distribution.slugs import slugify
@@ -106,12 +114,17 @@ def _download_entry(
 def _unpack(
     download: _Download, parent: Path, fallback_slug: str
 ) -> tuple[Path, list[str], archive.CheckedCourse]:
-    """Extract ``download`` to a new temporary directory in ``parent`` and check it.
+    """Extract ``download`` to a new temporary directory in ``parent``, check it, and
+    move its manifest and task files into ``pyics_files/`` (see ``archive.relocate``).
     The directory is removed again if the course doesn't pass."""
     parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=".pyics-pull-", dir=parent))
     try:
         files = archive.extract(download.data, tmp)
+        # checked before anything is moved, so that all paths stay in ``tmp``
+        archive.check_course(tmp, fallback_slug)
+        moved = archive.relocate(tmp)
+        files = sorted(moved.get(f, f) for f in files)
         checked = archive.check_course(tmp, fallback_slug)
         if problems := check(requires_pyics=checked.info.requires_pyics):
             raise _requirement_error(checked.info.title, problems)
@@ -135,7 +148,9 @@ def _write_origin(
         "files": files,
     }
     text = json.dumps(origin, indent=4) + "\n"
-    (directory / ORIGIN_FILE).write_text(text, encoding="utf-8")
+    fp = origin_path(directory)
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    fp.write_text(text, encoding="utf-8")
 
 
 def _check_dest(dest: Path) -> None:
@@ -143,7 +158,7 @@ def _check_dest(dest: Path) -> None:
     directory."""
     if not dest.exists() or (dest.is_dir() and not any(dest.iterdir())):
         return
-    if (dest / ORIGIN_FILE).is_file():
+    if origin_path(dest).is_file() or (dest / ORIGIN_FILE).is_file():
         raise PullError(
             f"The course was pulled to {dest} already: update it with: pyics update "
             f"{dest}"
@@ -233,8 +248,12 @@ def find_origin(directory: Path) -> tuple[Path, dict[str, Any]]:
         If ``directory`` isn't in a pulled course.
     """
     directory = paths.absolute(directory)
-    for candidate in [directory, *directory.parents]:
-        fp = candidate / ORIGIN_FILE
+    candidates = [directory, *directory.parents]
+    # where it is written, before where older versions wrote it, so that the course
+    # is found from within its ``pyics_files/`` too
+    found = [(c, origin_path(c)) for c in candidates]
+    found += [(c, c / ORIGIN_FILE) for c in candidates]
+    for candidate, fp in found:
         if not fp.is_file():
             continue
         try:
@@ -264,17 +283,6 @@ def _origin_source(origin: dict[str, Any], allow_http: bool) -> Source | None:
     if isinstance(origin.get("index"), str):
         return Source(name, origin["index"], allow_http)
     raise PullError(f"The course was pulled from the source {name!r}, which is gone")
-
-
-def _remove_empty_dirs(path: Path, root: Path) -> None:
-    """Remove the directories of ``path`` below ``root`` that are left empty."""
-    for parent in path.parents:
-        if parent == root or not parent.is_relative_to(root):
-            return
-        try:
-            parent.rmdir()
-        except OSError:  # not empty
-            return
 
 
 def update(
@@ -320,7 +328,7 @@ def update(
             download = _fetch_archive(origin["url"], allow_http=allow_http)
             latest = download.sha256
         else:
-            raise PullError(f"{root / ORIGIN_FILE} doesn't say where it came from")
+            raise PullError(f"The origin file of {root} doesn't say where it came from")
 
         if latest == origin.get("sha256") and not force:
             manifest_path = archive.find_manifest(root)
@@ -362,8 +370,10 @@ def update(
             if target in protected or not target.is_file():
                 continue
             target.unlink()
-            _remove_empty_dirs(target, root)
+            remove_empty_dirs(target, root)
         _write_origin(root, download, checked.info, [f for f in files if f not in kept])
+        # where older versions wrote it
+        (root / ORIGIN_FILE).unlink(missing_ok=True)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return Pulled(
