@@ -6,7 +6,39 @@ _For instructors: this page is written for your students. Link to it, or copy it
 
 ## Setup
 
-You need **Python 3.14 or newer**. Create an environment for the course and install PyICs and the packages the course needs:
+You need **Python 3.14 or newer** and an environment for the course, where PyICs and the packages the course needs are installed.
+
+### Recommended: uv
+
+If you are new to PyICs (or to Python), use [uv](https://docs.astral.sh/uv/). It installs the right Python for you, even if you don't have Python yet.
+
+1. Install uv (once per computer):
+
+   ```sh
+   # macOS and Linux
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+   ```powershell
+   # Windows (PowerShell)
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+
+   Then open a new terminal, so that the `uv` command is found. Other ways to install it are listed in the [uv documentation](https://docs.astral.sh/uv/getting-started/installation/).
+
+2. In the folder where you want to keep the course, create the environment and install PyICs:
+
+   ```sh
+   uv venv --python 3.14            # creates .venv, and downloads Python 3.14 if needed
+   source .venv/bin/activate        # Windows: .venv\Scripts\activate
+   uv pip install python-interactive-courses
+   ```
+
+Activate the environment again (the second command) every time you open a new terminal to work on the course.
+
+### Already comfortable with Python? pip works too
+
+If Python 3.14 or newer is already installed, you can use `venv` and `pip` instead:
 
 ```sh
 python -m venv .venv
@@ -30,7 +62,7 @@ Your instructor gives you one of these:
 - **A course archive** (`.zip`): `pyics pull <URL or path of the zip>`, then `cd` into the new directory.
 - **The course files**: just `cd` into their directory.
 
-If the course needs other packages, `pyics pull` tells you which, and how to install them (`--install_deps` installs them after asking). Install them in the same environment as PyICs.
+If the course needs other packages, `pyics pull` tells you which, and how to install them (`--install_deps` installs them after asking). Install them in the same environment as PyICs. An environment created by uv has no `pip`: install packages into it with `uv pip install <package>` while it is activated.
 
 > Courses run code on your computer. Only add sources and pull courses from people you trust.
 
@@ -74,7 +106,7 @@ Your exercise files and your progress are kept.
 
 ## Jupyter notebooks
 
-- When Jupyter or VS Code asks for a kernel, **choose the environment where PyICs is installed**.
+- When Jupyter or VS Code asks for a kernel, **choose the environment where PyICs is installed** (the `.venv` folder you created in [Setup](#setup)).
 - **Save** the notebook (<kbd>ctrl</kbd>+<kbd>s</kbd>) to run the tests. Running a cell isn't enough.
 - The tests run all cells from the top, like _Restart Kernel and Run All Cells_. An error in one cell doesn't stop the others, and failed tests name the cell that raised, e.g. `cell 7 raised NameError`. Cells are counted from the top, markdown cells included.
 - Don't delete the description cells of exercises: they mark where each exercise starts.
